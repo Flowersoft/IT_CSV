@@ -33,12 +33,18 @@
       margin: 0 auto;
       touch-action: none;
     }
-    
+	#operationBox {
+	  display: block;
+	}
+	#secondFilter {
+	  display: block;
+	}
+	
     select, input[type='text'], input[list], input[type='file'] {
       width: 50%;
       max-width: 250px;
       font-size: 1em;
-      padding: 10px;
+      padding: 5px;
       background-color: #1e1e1e;
       color: #e0e0e0;
       border: 1px solid #444;
@@ -53,8 +59,8 @@
       width: 40px;
     }
     button {
-      margin: 10px;
-      padding: 8px 16px;
+      margin: 3px;
+      padding: 3px 6px;
       font-size: 1em;
       background-color: #36a2eb;
       color: white;
@@ -78,14 +84,6 @@
     .danger-btn {
       background-color: #b71c1c;
       color: white;
-      border: none;
-      border-radius: 5px;
-      padding: 8px 16px;
-      font-size: 1em;
-      cursor: pointer;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.4);
-      transition: all 0.2s ease;
-      transform: translateY(0);
     }
     .danger-btn:hover {
       background-color: #d32f2f;
@@ -103,6 +101,10 @@
       padding: 5px;
 	  border-top: 1px solid #333;
     }
+	
+	#dataTable {
+	  max-width: 95%;
+	}
 	
 	table {
 	  border-collapse: collapse;
@@ -170,12 +172,14 @@
 
     @media (max-width: 768px) {
       body { padding: 20px; }
-      h2 { font-size: 1.8em; }
+      h2 { font-size: 1.5em; }
+      #operationBox { display: none; }
+      #secondFilter { display: none; }
       .latest-values { font-size: 1.5em; }
       .chartpar-box, .slider-box { display: block; }
-      input[type='text'], input[list] { font-size: 1.5em; padding: 12px; }
+      select, input[type='text'], input[list] { font-size: 0.8em; padding: 6px; }
       input[type='range'] { width: 95%; height: 30px; }
-      button { font-size: 1.2em; padding: 12px 20px; }
+      button { font-size: 1em; padding: 6px 12px; }
     }
 @media print {
   body * {
@@ -211,14 +215,14 @@
     <span id="rowCount" style="margin-left:20px; font-weight:bold;"></span>
 	<select id="fieldSelect"></select>
     <label for='filterValue'>Szűrés...</label>
-    <input type='text' id='filterValue' placeholder='Érték' style='padding: 6px; font-size: 1em; width: 200px; margin-left: 10px;' />
+    <input type='text' id='filterValue' placeholder='Érték' />
     <label><input type="checkbox" id="sortDesc"> Csökkenő sorrend</label>
     <label>
       <input type='checkbox' id='includeText' checked>
       Tartalmazza / Nem tartalmazza
     </label>
   </div>
-  <div class='simple-box'>
+  <div class='simple-box' id='secondFilter'>
     <label>
       <input type="radio" name="combineMode" value="and" checked> ÉS
     </label>
@@ -226,9 +230,9 @@
       <input type="radio" name="combineMode" value="or"> VAGY
     </label>
     <select id="fieldSelect2"></select>
-    <input type='text' id='filterValue2' placeholder='Érték 2' />
+    <input type='text' id='filterValue2' placeholder='Érték' />
   </div>
-  <div class='simple-box'> 
+  <div class='simple-box' id='operationBox'> 
     <button onclick="addRow()">Új sor</button>
     <button class="danger-btn" onclick="deleteRow()">Sor törlése</button>
     <button onclick="addColumn()">Új oszlop</button>
@@ -236,7 +240,9 @@
     <button onclick="window.print()">Nyomtatás</button>
   </div>
   <div id="dataTable"></div>
-  <button id="scanBtn">Vonalkód beolvasása</button>
+  <div class='simple-box'>
+    <button id="scanBtn">Vonalkód beolvasása</button>
+  </div>	
   <div id="reader" style="width:300px;"></div>
 
   <div class='footer-box' style='background-color: #505050;'>
@@ -252,11 +258,11 @@
 let scanner;
 let headers = [];
 let rows = [];
-let selectedRowIndex = null; // globális változó
+let selectedRowIndex = null;
 let selectedColIndex = null;
-let currentEdit = null; // {rowIndex, colIndex, td}
-const rowHeight = 28;     // px
-const visibleRows = 20;   // egyszerre ennyi sor renderelve
+let currentEdit = null;
+const rowHeight = 28;    
+const visibleRows = 20; 
 
 function loadBaseCsv() {
   fetch("base.csv")
@@ -292,19 +298,17 @@ function loadBaseCsv() {
     });
 }
 
-window.addEventListener("DOMContentLoaded", loadBaseCsv);
-
 document.getElementById("scanBtn").addEventListener("click", () => {
 //https://unpkg.com/html5-qrcode
   const readerDiv = document.getElementById("reader");
   readerDiv.style.display = "block"; // kamera előnézet megjelenítése
   scanner = new Html5Qrcode("reader");
   scanner.start(
-    //alert("!!!");
     { facingMode: "environment" }, // hátlapi kamera
     { fps: 10, qrbox: 250 },
     decodedText => {
       document.getElementById("filterValue").value = decodedText;
+	  input.dispatchEvent(new Event("input", { bubbles: true }));
       filterAndSortTable();
       scanner.stop().then(() => {
         document.getElementById("reader").style.display = "none";
@@ -319,6 +323,11 @@ document.getElementById("scanBtn").addEventListener("click", () => {
 document.getElementById('csvFile').addEventListener('change', e => {
   const file = e.target.files[0];
   if (!file) return;
+  headers = [];
+  rows = [];
+  selectedRowIndex = null;
+  selectedColIndex = null;
+  currentEdit = null;
   const reader = new FileReader();
   reader.onload = evt => {
     const buffer = evt.target.result;
@@ -540,6 +549,8 @@ document.querySelectorAll('input[name="combineMode"]').forEach(el => {
 });
 document.getElementById('fieldSelect2').addEventListener('change', drawVirtualTable);
 document.getElementById('filterValue2').addEventListener('input', drawVirtualTable);
+window.addEventListener("DOMContentLoaded", loadBaseCsv);
+
 
 function scrollToSelectedColumn(table, viewport) {
   const fieldName = document.getElementById('fieldSelect').value;
