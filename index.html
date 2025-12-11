@@ -113,25 +113,33 @@ function loadBaseCsv() {
 
 document.getElementById("scanBtn").addEventListener("click", () => {
   const readerDiv = document.getElementById("reader");
-  readerDiv.style.display = "block"; // kamera előnézet megjelenítése
+  readerDiv.style.display = "block";
   scanner = new Html5Qrcode("reader");
   scanner.start(
-    { facingMode: "environment" }, // hátlapi kamera
+    { facingMode: "environment" },
     { fps: 10, qrbox: 250 },
     decodedText => {
-	  const input = document.getElementById("filterValue");
-      input.value = decodedText;
-	  drawVirtualTable();
-	  //input.dispatchEvent(new Event("input", { bubbles: true }));
-      scanner.stop().then(() => {
-        document.getElementById("reader").style.display = "none";
-      });
+      scanner.pause();
     },
     errorMessage => {
-      //alert("Hiba: " + errorMessage); // telefonon is látszik
+      console.warn("Hiba:", errorMessage);
     }
   );
+
+  readerDiv.addEventListener("click", () => {
+    scanner.resume(); // engedjük egy pillanatra
+    scanner.getState();
+    scanner._qrCodeSuccessCallback = decodedText => {
+      const input = document.getElementById("filterValue");
+      input.value = decodedText;
+	  drawVirtualTable()
+      scanner.stop().then(() => {
+        readerDiv.style.display = "none";
+      });
+    };
+  }, { once: true });
 });
+
 
 document.getElementById('csvFile').addEventListener('change', e => {
   const file = e.target.files[0];
