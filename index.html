@@ -9,7 +9,7 @@
   <script src='https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0'></script>
   <script src="https://unpkg.com/html5-qrcode"></script>
   <link rel="stylesheet" href="styles.css">
-  <link rel='icon' type='image/png' href='/favicon.png'>
+  <link rel='icon' type='image/png' href='favicon.ico'>
 </head>
 <body>
   <h2>CSV Nézegető és Szerkesztő</h2>
@@ -78,6 +78,11 @@ const rowHeight = 28;
 const visibleRows = 20; 
 
 function loadBaseCsv() {
+// pl. max 768px szélesség → mobil
+  if (!window.matchMedia("(max-width: 768px)").matches) {
+    console.log("Nem mobil nézet, base.csv nem töltődik be");
+    return;
+  }
   fetch("base.csv")
     .then(resp => {
       if (!resp.ok) throw new Error("base.csv nem található");
@@ -227,34 +232,25 @@ function drawVirtualTable() {
 function renderRows(startIndex) {
   tbody.innerHTML = '';
   const endIndex = Math.min(startIndex + visibleRows, filtered.length);
-
   for (let i = startIndex; i < endIndex; i++) {
     const obj = filtered[i];
     const tr = document.createElement('tr');
-
     tr.onclick = () => {
       // előző kijelölés törlése
       tbody.querySelectorAll("tr").forEach(r => r.classList.remove("selected"));
       tr.classList.add("selected");
       selectedRowIndex = obj.index; // eredeti rows index
     };
-
     // ha ez a sor volt kijelölve, állítsuk vissza
     if (obj.index === selectedRowIndex) {
       tr.classList.add("selected");
     }
-
     obj.row.forEach((val, ci) => {
       const td = document.createElement('td');
       td.textContent = val;
       td.title = val;
       td.oncontextmenu = (e) => {
         e.preventDefault();
-        navigator.clipboard.writeText(td.textContent).then(() => {
-          console.log("Másolva a vágólapra:", td.textContent);
-        }).catch(err => {
-          console.error("Másolás sikertelen:", err);
-        });
         currentEdit = { rowIndex: obj.index, colIndex: ci, td };
         document.getElementById('editorArea').value = td.textContent;
         document.getElementById('editorPopup').style.display = 'block';
@@ -262,10 +258,8 @@ function renderRows(startIndex) {
       };
       tr.appendChild(td);
     });
-
     tbody.appendChild(tr);
   }
-
   table.style.top = (startIndex * rowHeight) + 'px';
 }
 
@@ -397,9 +391,14 @@ function scrollToSelectedColumn(table, viewport) {
 }
 
 function addRow() {
-  const newRow = headers.map(() => "");
-  rows.push(newRow);
-  drawVirtualTable();
+  if (selectedRowIndex !== null) {
+    const newRow = headers.map(() => "");
+    // beszúrás a kijelölt sor UTÁN
+    rows.splice(selectedRowIndex + 1, 0, newRow);
+    drawVirtualTable();
+  } else {
+    alert("Előbb jelölj ki egy sort beszúráshoz!");
+  }
 }
 
 function deleteRow() {
@@ -448,6 +447,12 @@ function saveEdit() {
 }
 
 function closeEdit() {
+  const tc = document.getElementById('editorArea').value;
+  navigator.clipboard.writeText(tc).then(() => {
+    console.log("Másolva a vágólapra:", tc);
+      }).catch(err => {
+        console.error("Másolás sikertelen:", err);
+   });
   document.getElementById('editorPopup').style.display = 'none';
   currentEdit = null;
 }
