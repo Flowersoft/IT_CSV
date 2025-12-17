@@ -122,17 +122,14 @@ document.getElementById("scanBtn").addEventListener("click", () => {
   const readerDiv = document.getElementById("reader");
   const container = document.getElementById("eanTable");
   const eanEnabled = document.getElementById('eanEnabled').checked;
-  container.innerHTML = "(EAN-Ablak)";
   readerDiv.style.display = "block";
-  if (eanEnabled) searchBarcode("7630049201545");
-  return;
   scanner = new Html5Qrcode("reader");
   scanner.start(
     { facingMode: "environment" },
     { fps: 10, qrbox: 250 },
     decodedText => {
       const input = document.getElementById("filterValue");
-	  if (eanEnabled) searchBarcode(decodedText);
+	  if (eanEnabled) openApiResult(decodedText);
       input.value = decodedText;
       drawVirtualTable();
       scanner.stop().then(() => {
@@ -477,6 +474,11 @@ function saveFilteredCSV(filtered) {
   a.download = 'table.csv';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+function openApiResult(upc) {
+  const url = `https://api.upcitemdb.com/prod/trial/lookup?upc=${upc}`;
+  window.open(url, "_blank"); // új fülön/ablakon nyitja meg
 }
 
 async function searchBarcode(code) {
