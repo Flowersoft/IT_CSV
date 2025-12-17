@@ -124,8 +124,8 @@ document.getElementById("scanBtn").addEventListener("click", () => {
   const eanEnabled = document.getElementById('eanEnabled').checked;
   container.innerHTML = "(EAN-Ablak)";
   readerDiv.style.display = "block";
-  //if (eanEnabled) searchBarcode("7630049201545");
-  //return;
+  if (eanEnabled) searchBarcode("7630049201545");
+  return;
   scanner = new Html5Qrcode("reader");
   scanner.start(
     { facingMode: "environment" },
