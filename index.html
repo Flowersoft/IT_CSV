@@ -123,7 +123,7 @@ document.getElementById("scanBtn").addEventListener("click", () => {
   const container = document.getElementById("eanTable");
   const eanEnabled = document.getElementById('eanEnabled').checked;
   readerDiv.style.display = "block";
-  if (eanEnabled) searchBarcode("7630049201545");
+  //if (eanEnabled) searchBarcode("7630049201545");
   scanner = new Html5Qrcode("reader");
   scanner.start(
     { facingMode: "environment" },
