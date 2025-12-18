@@ -123,13 +123,15 @@ document.getElementById("scanBtn").addEventListener("click", () => {
   const container = document.getElementById("eanTable");
   const eanEnabled = document.getElementById('eanEnabled').checked;
   readerDiv.style.display = "block";
+  if (eanEnabled) searchBarcode("7630049201545");
   scanner = new Html5Qrcode("reader");
   scanner.start(
     { facingMode: "environment" },
     { fps: 10, qrbox: 250 },
     decodedText => {
       const input = document.getElementById("filterValue");
-	  if (eanEnabled) openApiResult(decodedText);
+	  //if (eanEnabled) openApiResult(decodedText);
+	  if (eanEnabled) searchBarcode(decodedText);
       input.value = decodedText;
       drawVirtualTable();
       scanner.stop().then(() => {
@@ -482,19 +484,18 @@ function openApiResult(upc) {
 }
 
 async function searchBarcode(code) {
-  const url = `https://api.upcitemdb.com/prod/trial/lookup?upc=${code}`;
+  const url = `http://192.168.0.30/itcsv/upclookup.php?upc=${code}`;
+  const container = document.getElementById("eanTable");
+  container.innerHTML = ""; // előző tartalom törlése
   try {
     const resp = await fetch(url);
-    if (!resp.ok) throw new Error("API hiba: " + resp.status);
+    if (!resp.ok) throw new Error("Proxy hiba: " + resp.status);
     const data = await resp.json();
-
-    const container = document.getElementById("eanTable");
-    container.innerHTML = ""; // előző tartalom törlése
     if (data.items && data.items.length > 0) {
       const table = document.createElement("table");
-      table.border = "1";
+      table.className = "ean-table";
       const headerRow = document.createElement("tr");
-      ["UPC", "Név", "Gyártó", "Kategória"].forEach(h => {
+      ["UPC", "Név", "Gyártó", "Kategória", "Kép"].forEach(h => {
         const th = document.createElement("th");
         th.textContent = h;
         headerRow.appendChild(th);
@@ -514,15 +515,26 @@ async function searchBarcode(code) {
         const tdCategory = document.createElement("td");
         tdCategory.textContent = item.category || "";
         tr.appendChild(tdCategory);
+        const tdImage = document.createElement("td");
+        if (item.images && item.images.length > 0) {
+          const img = document.createElement("img");
+          img.src = item.images[0];
+          img.alt = item.title || "Termékkép";
+          img.style.maxWidth = "80px";
+          tdImage.appendChild(img);
+        } else {
+          tdImage.textContent = "-";
+        }
+        tr.appendChild(tdImage);
         table.appendChild(tr);
       });
       container.appendChild(table);
     } else {
-      container.textContent = "Nincs találat erre a kódra: " + code;
+      container.textContent = `Nincs találat erre a kódra: ${code}`;
     }
   } catch (err) {
     console.error("Lekérdezés sikertelen:", err);
-    document.getElementById("eanTable").textContent = "Hiba történt a lekérdezésnél.";
+    container.textContent = "Hiba történt a lekérdezésnél.";
   }
 }
 
