@@ -8,11 +8,12 @@
   <script src='https://cdn.jsdelivr.net/npm/hammerjs@2.0.8'></script>
   <script src='https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.2.0'></script>
   <script src="https://unpkg.com/html5-qrcode"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
   <link rel="stylesheet" href="styles.css">
   <link rel='icon' type='image/png' href='favicon.ico'>
 </head>
 <body>
-  <h2>Adattábla nézegető és szerkesztő</h2>
+  <h2>Adattábla nézegető</h2>
   <div class='simple-box' id='scanBox'>
     <button id="scanBtn">Vonalkód beolvasása</button>
     <label><input type="checkbox" id="eanEnabled"> EAN</label>
@@ -57,13 +58,21 @@
     <button class="danger-btn" onclick="deleteRow()">Sor törlése</button>
     <button onclick="addColumn()">Új oszlop</button>
     <button class="danger-btn" onclick="deleteColumn()">Oszlop törlése</button>
-    <button onclick="window.print()">Nyomtatás</button>
+  </div>
+  <div class='simple-box' id='printBox'> 
+    <button onclick="dataPrint()">Nyomtatás</button>
   </div>
   <div id="eanTable"></div>
   <div id="dataTable"></div>
   <div class='footer-box' id='footerBox' style='background-color: #505050;'>
     <p>© 2025 IT_DATASET v.1.0</p>
   </div>
+<div id="printArea" style="width:300px; margin-top: 24px; font-family: Arial, sans-serif;">
+  <div id="printLabel" style="text-align:center; font-size:16px; margin-bottom:4px;"></div>
+  <div style="text-align:center;">
+    <svg id="printBarcode"></svg>
+  </div>
+</div>
 
 <script>
 let scanner;
@@ -929,6 +938,28 @@ async function searchBarcode(code) {
     console.error("Lekérdezés sikertelen:", err);
     container.textContent = "Hiba történt a lekérdezésnél.";
   }
+}
+
+function prepareBarCode() {
+  if (selectedRowIndex === null) {
+    alert("Nincs kijelölt sor.");
+    return;
+  }
+  const labelText = rows[selectedRowIndex][1];
+  const barcodeValue = rows[selectedRowIndex][6];
+  document.getElementById("printLabel").textContent = labelText;
+  JsBarcode("#printBarcode", barcodeValue, {
+    format: "CODE128",
+    lineColor: "#000",
+    width: 3,
+    height: 56,
+    displayValue: true
+  });
+}
+
+function dataPrint() {
+  prepareBarCode();
+  window.print();
 }
 
 document.getElementById('fieldSelect').addEventListener('change', drawVirtualTable);

@@ -1,4 +1,5 @@
 body {
+  text-align: center;	
   background-color: #121212;
   color: #e0e0e0;
   font-family: sans-serif;
@@ -179,7 +180,11 @@ tr.selected, .highlighted, td[contenteditable='true']:focus {
   button { font-size: 1em; padding: 6px 12px; }
 }
 @media print {
+   #printArea {
+    page-break-after: avoid;
+    page-break-before: avoid;
+  }
   body * { visibility: hidden; }
-  #dataTable, #dataTable * { visibility: visible; }
-  #dataTable { position: absolute; left: 0; top: 0; width: 100%; }
+  #printArea, #printArea * { visibility: visible; }
+  #printArea { position: absolute; left: 0; top: 0; }
 }
