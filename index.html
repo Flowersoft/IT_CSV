@@ -945,8 +945,8 @@ function prepareBarCode() {
     alert("Nincs kijelölt sor.");
     return;
   }
-  const labelText = rows[selectedRowIndex][1];
-  const barcodeValue = rows[selectedRowIndex][6];
+  const labelText = rows[selectedRowIndex][2];
+  const barcodeValue = rows[selectedRowIndex][1];
   document.getElementById("printLabel").textContent = labelText;
   JsBarcode("#printBarcode", barcodeValue, {
     format: "CODE128",

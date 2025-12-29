@@ -185,6 +185,6 @@ tr.selected, .highlighted, td[contenteditable='true']:focus {
     page-break-before: avoid;
   }
   body * { visibility: hidden; }
-  #printArea, #printArea * { visibility: visible; }
+  #printArea, #printArea * { visibility: visible; color: black; }
   #printArea { position: absolute; left: 0; top: 0; }
 }
