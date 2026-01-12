@@ -565,15 +565,19 @@ function generateEditorContent(type, val) {
   switch (type) {
     case "string":
       return `
-		<input type="text" id="editorArea" value="${val}" style="width:95%;"><br>
+		<input type="text" id="editorArea" value="${val}"
+		  style="width:95%;"
+		  onfocus="this.select()"
+		  onkeydown="if(event.key==='Enter'){ document.getElementById('editorSave').click();}"><br>
         <button id="editorSave">Mentés</button>
         <button id="editorCancel">Mégse</button>
       `;
 	case "number":
 	  return `
 		<input type="number" id="editorNum" value="${val}" 
-		  style="width:95%;"
-		  oninput="document.getElementById('editorArea').value = this.value">
+		  style="width:95%;" onfocus="this.select()"
+		  oninput="document.getElementById('editorArea').value = this.value"
+		  onkeydown="if(event.key==='Enter'){ document.getElementById('editorSave').click(); }">
 		<br>
 		<input type="text" id="editorArea" value="${val}" readonly>
 		<button id="editorSave">Mentés</button>
@@ -990,5 +994,6 @@ window.addEventListener("DOMContentLoaded", () => {
   createEmptyTable();
   loadBaseCsv();
 });
+setTimeout(() => document.getElementById("editorArea")?.focus(), 0);
 
 </script>
