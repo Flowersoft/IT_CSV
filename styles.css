@@ -119,7 +119,7 @@ th {
   background-color: #4c4c4c;
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: 2;
 }
 
 td {
@@ -133,9 +133,68 @@ td[title] {
   cursor: help;                 /* tooltip jelzés */
 }
 
+tr.sum-row {
+  position: sticky;
+  top: 28px;
+  z-index: 1;
+  background-color: #3a3a3a !important;
+}
+
+tr.sum-row td {
+  position: sticky;
+  top: 28px;
+  background-color: inherit;
+}
+
 tr:nth-child(even) {
   background-color: #181818;
 }
+
+details.list-details {
+  cursor: pointer;
+  user-select: none;
+}
+
+details.list-details summary {
+  color: #ffcd56;
+  font-weight: bold;
+  padding: 4px 0;
+  display: flex;
+  align-items: center;
+  outline: none;
+  transition: color 0.2s ease;
+}
+
+details.list-details summary:hover {
+  color: #ffe066;
+}
+
+details.list-details[open] summary {
+  color: #ffed4e;
+}
+
+details.list-details ul {
+  margin: 6px 0;
+  padding-left: 20px;
+  font-size: 0.85em;
+  background-color: rgba(255, 205, 86, 0.1);
+  border-left: 2px solid #ffcd56;
+  padding: 6px 8px 6px 16px;
+  border-radius: 3px;
+  list-style: none;
+  line-height: 1.4;
+}
+
+details.list-details ul li {
+  margin: 3px 0;
+  color: #e0e0e0;
+}
+
+details.list-details ul li strong {
+  color: #ffcd56;
+}
+
+
 
 td[contenteditable='true'] {
   background: #00832; /* alap szín, ha szerkeszthető */

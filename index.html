@@ -18,8 +18,12 @@
     <button id="scanBtn">Vonalkód beolvasása</button>
     <label><input type="checkbox" id="eanEnabled"> EAN</label>
   <div id="reader" style="width:300px;"></div>
-  </div>	
-  <div class='simple-box no-web' id='openAndSave'>
+  </div>
+  <div class="simple-box">
+    <label>XML kulcs:</label>
+    <input type="text" id="xmlKeyInput" value="Record" style="width:120px;">
+  </div>
+	  <div class='simple-box no-web' id='openAndSave'>
     <label>Kódolás:</label>
     <select id="encodingSelect">
       <option value="utf-8" selected>UTF-8</option>
@@ -28,7 +32,7 @@
     </select>
     <label>Határoló:</label>
     <input type="text" id="delimiterInput" value=";" maxlength="1" style="width:30px; text-align:center;">
-    <input type='file' id='dataFile' accept='.csv, .json'>
+    <input type='file' id='dataFile' accept='.csv, .json, .xml'>
     <button id="saveCsvBtn">CSV Mentés</button>
 	<button id="saveJsonBtn">JSON mentés</button>
   </div>
@@ -84,7 +88,7 @@ let selectedColIndex = null;
 let currentEdit = null;
 let defaultPrefix = null;
 let filtered = [];
-const rowHeight = 28;    
+const rowHeight = 27;    
 const visibleRows = 20; 
 
 function resetAll() {
@@ -173,6 +177,61 @@ function loadBaseCsv() {
     });
 }
 
+function loadXmlAsTable(file) {
+    const reader = new FileReader();
+
+    reader.onload = e => {
+        const text = e.target.result;
+
+        const parser = new DOMParser();
+        const xml = parser.parseFromString(text, "text/xml");
+
+        // 🔑 kulcs beolvasása
+        const key = document.getElementById("xmlKeyInput").value.trim() || "Record";
+
+        // rekordok keresése
+        const records = xml.getElementsByTagName(key);
+        if (!records.length) {
+            alert("Nem található <" + key + "> elem az XML-ben.");
+            return;
+        }
+
+        // 1) mezőnevek az első Record alapján
+        const first = records[0].children;
+        headers = ["ID", ...Array.from(first).map(n => n.tagName)];
+
+        // 2) sorok összeállítása
+        rows = [];
+        Array.from(records).forEach((rec, idx) => {
+            const row = ["ID-" + String(idx + 1).padStart(6, "0")];
+
+            Array.from(first).forEach(f => {
+                const node = rec.getElementsByTagName(f.tagName)[0];
+                let val = node ? node.textContent.trim() : "";
+                val = val.replace(/&#39;/g, "'");   // aposztróf javítás
+                row.push(val);
+            });
+
+            rows.push(row);
+        });
+
+        // 3) meződefiníciók (egyszerű text mezők)
+        fieldDefinitions = {
+            extraInfo: headers.slice(1).map((h, i) => ({
+                id: i + 1,
+                name: h.replace(/\s+/g, "_"),
+                label: h,
+                type: "string"
+            }))
+        };
+
+        buildFieldSelect();
+        drawVirtualTable();
+    };
+
+    reader.readAsText(file, "utf-8");
+}
+
 document.getElementById("scanBtn").addEventListener("click", () => {
   const readerDiv = document.getElementById("reader");
   const container = document.getElementById("eanTable");
@@ -219,6 +278,12 @@ document.getElementById('dataFile').addEventListener('change', e => {
     reader.readAsText(file);
     return; // fontos: ne fusson tovább a CSV ág
   }
+  
+  if (name.endsWith(".xml") || name.endsWith(".afx")) {
+    loadXmlAsTable(file);
+    return;
+  }
+
   const reader = new FileReader();
   reader.onload = evt => {
     const buffer = evt.target.result;
@@ -337,6 +402,13 @@ function drawVirtualTable() {
   const thead = document.createElement('thead');
   const headRow = buildHeaderRow();   // itt épül fel a kijelölhető fejléc
   thead.appendChild(headRow);
+  
+  // Oszlopösszegek hozzáadása a fejléc alá
+  const sumRow = buildSumRow(filtered);
+  if (sumRow) {
+    thead.appendChild(sumRow);
+  }
+  
   table.appendChild(thead);
   const tbody = document.createElement('tbody');
   table.appendChild(tbody);
@@ -359,37 +431,69 @@ function renderRows(startIndex) {
     }
     obj.row.forEach((val, ci) => {
       const td = document.createElement('td');
-      td.textContent = val;
-      td.title = val;
-	  td.dataset.row = obj.index;
-	  td.dataset.col = ci;
-	  
+      td.dataset.row = obj.index;
+      td.dataset.col = ci;
+      
+      // Detektáljuk a mező típusát
+      const field = fieldDefinitions.extraInfo[ci - 1];
+      const fieldType = field?.type;
+      
+      // List típusú mező speciális kezelése
+      if (fieldType === 'list') {
+        let listItems = [];
+        try {
+          listItems = JSON.parse(val || '[]');
+        } catch (e) {
+          listItems = [];
+        }
+        
+        if (!Array.isArray(listItems)) {
+          listItems = [];
+        }
+        
+        const itemCount = listItems.length;
+        const summaryText = itemCount > 0 ? `📋 ${itemCount} elem` : '📋 Üres';
+        const listHtml = listItems
+          .map((item) => {
+            let display = item;
+            if (typeof item === 'object' && item.key && item.value) {
+              display = `<strong>${item.key}:</strong> ${item.value}`;
+            } else if (typeof item === 'object') {
+              display = JSON.stringify(item);
+            }
+            return `<li>${display}</li>`;
+          })
+          .join('');
+        
+        td.innerHTML = `
+          <details class="list-details">
+            <summary>${summaryText}</summary>
+            <ul>
+              ${listHtml}
+            </ul>
+          </details>
+        `;
+        td.title = `${itemCount} elem a listában`;
+      } else {
+        td.textContent = val;
+        td.title = val;
+      }
+      
 	  let lastTap = 0;
 	  td.addEventListener("touchend", e => {
 	  const now = Date.now();
 	  if (now - lastTap < 300) {
         const field = fieldDefinitions.extraInfo[ci - 1];
-	    const type = field.type;
+	    const type = field?.type;
 		openEditor(obj.index, ci, type);
 	  }
 	  lastTap = now;
 	});
 	  
-	  /*td.addEventListener("touchstart", e => {
-		pressTimer = setTimeout(() => {
-          const field = fieldDefinitions.extraInfo[ci - 1];
-		  const type = field.type;
-		  openEditor(obj.index, ci, type);
-		}, 600);
-	  });
-	  td.addEventListener("touchend", e => {
-		clearTimeout(pressTimer);
-	  });*/
-	  
       td.oncontextmenu = (e) => {
         e.preventDefault();
         const field = fieldDefinitions.extraInfo[ci - 1];
-		const type = field.type;
+		const type = field?.type;
 		openEditor(obj.index, ci, type);
       };
       tr.appendChild(td);
@@ -405,6 +509,7 @@ function renderRows(startIndex) {
   });
   renderRows(0);
   viewport.appendChild(table);
+  
   container.appendChild(viewport);
   scrollToSelectedColumn(table, viewport);
 }
@@ -541,14 +646,134 @@ function scrollToSelectedColumn(table, viewport) {
   }
 }
 
+function buildSumRow(filtered) {
+  if (!filtered || filtered.length === 0) return null;
+
+  // Rugalmas számparzoló, kezeli a "," és "." tizedesjelet, valamint ezerelválasztókat
+  function parseNumberFlexible(s) {
+    if (s === null || s === undefined) return NaN;
+    let str = String(s).trim();
+    if (str === '') return NaN;
+    // távolítsunk el szóközöket és nem szám/jel karaktereket (kivéve . , + -)
+    str = str.replace(/\s+/g, '');
+    str = str.replace(/[^0-9\.,\-+]/g, '');
+
+    const hasDot = str.indexOf('.') !== -1;
+    const hasComma = str.indexOf(',') !== -1;
+
+    if (hasDot && hasComma) {
+      // mindkettő jelen van: eldöntjük, melyik a tizedesjel a későbbi előfordulás alapján
+      if (str.lastIndexOf(',') > str.lastIndexOf('.')) {
+        // ',' tizedes, '.' ezerelválasztó
+        str = str.replace(/\./g, '').replace(',', '.');
+      } else {
+        // '.' tizedes, ',' ezerelválasztó
+        str = str.replace(/,/g, '');
+      }
+    } else if (hasComma && !hasDot) {
+      // csak vessző van: feltételezzük, hogy tizedesjel
+      str = str.replace(/,/g, '.');
+    } else {
+      // csak pont van, vagy nincs külön jel -> hagyjuk
+    }
+
+    const num = parseFloat(str);
+    return isFinite(num) ? num : NaN;
+  }
+
+  const sums = {};
+  let hasNumericColumn = false;
+
+  // 1) explicit típusok alapján
+  headers.forEach((h, idx) => {
+    if (idx === 0) return; // ID oszlop kihagyása
+    const fieldDef = fieldDefinitions.extraInfo[idx - 1];
+    const isNumeric = fieldDef && (fieldDef.type === 'number' || fieldDef.type === 'decimal');
+    if (isNumeric) {
+      hasNumericColumn = true;
+      sums[idx] = { sum: 0, count: 0, label: h, isNumeric: true };
+    }
+  });
+
+  // 2) ha nincs explicit, próbáljuk meg az értékek alapján detektálni
+  if (!hasNumericColumn) {
+    headers.forEach((h, idx) => {
+      if (idx === 0) return;
+      let convertibleCount = 0;
+      let nonEmptyCount = 0;
+      filtered.forEach(obj => {
+        const val = obj.row[idx];
+        if (val !== undefined && val !== null && String(val).trim() !== '') {
+          nonEmptyCount++;
+          const num = parseNumberFlexible(val);
+          if (!isNaN(num)) convertibleCount++;
+        }
+      });
+      if (nonEmptyCount > 0 && convertibleCount / nonEmptyCount >= 0.8) {
+        hasNumericColumn = true;
+        sums[idx] = { sum: 0, count: 0, label: h, isNumeric: true };
+      }
+    });
+  }
+
+  if (!hasNumericColumn) return null;
+
+  // 3) összegzés
+  Object.keys(sums).forEach(colIdx => {
+    filtered.forEach(obj => {
+      const val = obj.row[colIdx];
+      const num = parseNumberFlexible(val);
+      if (!isNaN(num)) {
+        sums[colIdx].sum += num;
+        sums[colIdx].count += 1;
+      }
+    });
+  });
+
+  // 4) sor létrehozása
+  const tr = document.createElement('tr');
+  tr.className = 'sum-row';
+  tr.style.backgroundColor = '#3a3a3a';
+  tr.style.fontWeight = 'bold';
+  tr.style.position = 'sticky';
+  tr.style.top = (rowHeight) + 'px';
+  tr.style.zIndex = '1';
+
+  headers.forEach((h, idx) => {
+    const td = document.createElement('td');
+    if (idx === 0) {
+      td.textContent = 'Összesítés';
+      td.style.color = '#ffcd56';
+    } else if (sums[idx]) {
+      const sumValue = sums[idx].sum.toLocaleString('hu-HU', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+      td.textContent = sumValue;
+      td.style.color = '#ffcd56';
+      td.style.textAlign = 'right';
+    } else {
+      td.textContent = '';
+    }
+    tr.appendChild(td);
+  });
+
+  return tr;
+}
+
+function calculateColumnSums(filtered) {
+  // Ez a függvény már nem használatos, de meghagyom kompatibilitás céljából
+  return null;
+}
+
 function openEditor(rowIndex, colIndex, type) {
   currentEdit = { rowIndex, colIndex, type };
   const old = document.getElementById("editorPopup");
   if (old) old.remove();
-  const td = document.querySelector(
-    `td[data-row="${rowIndex}"][data-col="${colIndex}"]`
-  );
-  const val = td ? td.textContent : "";
+  
+  // Közvetlenül az adatok tömbből vegyük az értéket (list típusoknál nem működne a textContent)
+  const val = rows[rowIndex] && rows[rowIndex][colIndex] ? rows[rowIndex][colIndex] : "";
+  
   const popup = document.createElement("div");
   popup.id = "editorPopup";
   popup.className = "popup";
@@ -700,13 +925,9 @@ function saveEdit() {
   const area = document.getElementById("editorArea");
   const newVal = area ? area.value.trim() : "";
   rows[currentEdit.rowIndex][currentEdit.colIndex] = newVal;
-  const td = document.querySelector(
-    `td[data-row="${currentEdit.rowIndex}"][data-col="${currentEdit.colIndex}"]`)
-  if (td) {
-    td.textContent = newVal;
-    td.title = newVal;
-  }
   closeEdit();
+  // Teljes táblázat újrarajzolása, hogy az összes mező típus (list, stb.) helyesen megjelenjen
+  drawVirtualTable();
 }
 
 function closeEdit() {
@@ -765,6 +986,32 @@ function addRow() {
   } else {
     rows.push(newRow);
   }
+  drawVirtualTable();
+}
+
+function deleteRow() {
+  if (selectedRowIndex === null) {
+    alert("Előbb jelölj ki egy sort törléshez!");
+    return;
+  }
+
+  if (!confirm("Biztosan törlöd a kijelölt sort?")) {
+    return;
+  }
+
+  // Sor törlése
+  rows.splice(selectedRowIndex, 1);
+
+  // Ha a törölt sor után már nincs több, lépjünk vissza eggyel
+  if (selectedRowIndex >= rows.length) {
+    selectedRowIndex = rows.length - 1;
+  }
+
+  // Ha már nincs sor, nullázzuk
+  if (rows.length === 0) {
+    selectedRowIndex = null;
+  }
+
   drawVirtualTable();
 }
 
