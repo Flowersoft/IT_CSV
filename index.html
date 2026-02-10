@@ -781,28 +781,65 @@ function openEditor(rowIndex, colIndex, type) {
   document.body.appendChild(popup);
   document.getElementById("editorSave").onclick = saveEdit;
   document.getElementById("editorCancel").onclick = closeEdit;
+  
   const area = document.getElementById("editorArea");
   popup.style.display = "block";
-  if (area) area.focus();
+  
+  // Általános enter és esc kezelés az összes editor típushoz
+  if (area) {
+    area.focus();
+    // Ha select támogatott, jelöljük ki az eredeti értéket
+    if (typeof area.select === 'function') {
+      area.select();
+    }
+    // Enter → mentés
+    area.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        document.getElementById('editorSave').click();
+      }
+      // Esc → bezárás
+      else if (e.key === 'Escape') {
+        document.getElementById('editorCancel').click();
+      }
+    };
+  }
+  
+  // Number input speciális kezeléshez (ha van)
+  const numInput = document.getElementById("editorNum");
+  if (numInput) {
+    numInput.focus();
+    numInput.select();
+    // Az input value-ja szinkronizálódik az editorArea-val (csak olvasási céllal)
+    numInput.oninput = () => {
+      area.value = numInput.value;
+    };
+    numInput.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        document.getElementById('editorSave').click();
+      } else if (e.key === 'Escape') {
+        document.getElementById('editorCancel').click();
+      }
+    };
+  }
+  
+  // Date input kezeléshez (ha van)
+  const dateInput = document.getElementById("editorArea");
+  if (dateInput && dateInput.type === 'date') {
+    dateInput.focus();
+  }
 }
 
 function generateEditorContent(type, val) {
   switch (type) {
     case "string":
       return `
-		<input type="text" id="editorArea" value="${val}"
-		  style="width:95%;"
-		  onfocus="this.select()"
-		  onkeydown="if(event.key==='Enter'){ document.getElementById('editorSave').click();}"><br>
+		<input type="text" id="editorArea" value="${val}" style="width:95%;"><br>
         <button id="editorSave">Mentés</button>
         <button id="editorCancel">Mégse</button>
       `;
 	case "number":
 	  return `
-		<input type="number" id="editorNum" value="${val}" 
-		  style="width:95%;" onfocus="this.select()"
-		  oninput="document.getElementById('editorArea').value = this.value"
-		  onkeydown="if(event.key==='Enter'){ document.getElementById('editorSave').click(); }">
+		<input type="number" id="editorNum" value="${val}" style="width:95%;">
 		<br>
 		<input type="text" id="editorArea" value="${val}" readonly>
 		<button id="editorSave">Mentés</button>
@@ -810,11 +847,8 @@ function generateEditorContent(type, val) {
 	  `;
 	case "date":
 	  return `
-		<input type="date" id="editorDate" value="${val}" 
-		  style="width:95%;"
-		  onchange="document.getElementById('editorArea').value = this.value">
+		<input type="date" id="editorArea" value="${val}" style="width:95%;">
 		<br>
-		<input type="text" id="editorArea" value="${val}" readonly>
 		<button id="editorSave">Mentés</button>
 		<button id="editorCancel">Mégse</button>
 	  `;
@@ -931,13 +965,14 @@ function saveEdit() {
 }
 
 function closeEdit() {
-  const tc = document.getElementById('editorArea').value;
+  const tc = document.getElementById('editorArea')?.value || '';
   navigator.clipboard.writeText(tc).then(() => {
     console.log("Másolva a vágólapra:", tc);
       }).catch(err => {
         console.error("Másolás sikertelen:", err);
    });
-  document.getElementById('editorPopup').style.display = 'none';
+  const popup = document.getElementById('editorPopup');
+  if (popup) popup.style.display = 'none';
   currentEdit = null;
 }
 
