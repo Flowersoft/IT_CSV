@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>meRGB</title>
+<style>
+    body {
+        background: #111;
+        color: #eee;
+        font-family: sans-serif;
+        text-align: center;
+    }
+    canvas {
+        background: #222;
+        margin-top: 10px;
+        cursor: pointer;
+    }
+    #gameover {
+        margin-top: 10px;
+        font-size: 20px;
+        color: #ff6666;
+        display: none;
+    }
+    .menu button {
+        margin: 5px;
+        padding: 10px 20px;
+        font-size: 16px;
+        background: #333;
+        color: #eee;
+        border: 1px solid #555;
+        cursor: pointer;
+    }
+    .menu button:hover {
+        background: #444;
+    }
+
+    /* === REKORD POPUP === */
+    #recordPopup {
+        position: fixed;
+        top: 0; left: 0;
+        width: 100%; height: 100%;
+        background: rgba(0,0,0,0.6);
+        display: none;
+        justify-content: center;
+        align-items: center;
+    }
+    #recordBox {
+        background: #fff;
+        color: #000;
+        padding: 20px 30px;
+        border-radius: 10px;
+        text-align: center;
+        font-size: 20px;
+        min-width: 250px;
+    }
+    #recordBox button {
+        margin-top: 15px;
+        padding: 8px 20px;
+        font-size: 16px;
+        background: #333;
+        color: #fff;
+        border: none;
+        cursor: pointer;
+    }
+    #recordBox button:hover {
+        background: #555;
+    }
+</style>
+</head>
+<body>
+
+<h1>meRGB</h1>
+
+<div class="menu">
+    <button id="easyBtn" onclick="startGame('easy')">Könnyű</button>
+    <button id="mediumBtn" onclick="startGame('medium')">Közepes</button>
+    <button id="hardBtn" onclick="startGame('hard')">Nehéz</button>
+</div>
+
+<p>Pont: <span id="score">0</span></p>
+
+<div id="gameover">Vége a játéknak!</div>
+
+<canvas id="game"></canvas>
+
+<!-- === REKORD POPUP === -->
+<div id="recordPopup">
+    <div id="recordBox">
+        <div id="recordText"></div>
+        <button onclick="closeRecordPopup()">OK</button>
+    </div>
+</div>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const scoreEl = document.getElementById('score');
+const gameOverEl = document.getElementById('gameover');
+
+let COLS = 8;
+let ROWS = 12;
+let CELL = 40;
+
+let MAX_WHITE_LIFE = 20;
+let SWAP_PENALTY = 3;
+
+let grid = [];
+let whiteLife = [];
+let score = 0;
+let selected = null;
+let hoverInfo = null;
+
+let difficulty = "medium";
+
+// === RGB ALAPSZÍNEK ===
+const BASE = [1,2,4];
+const missing = { 3:4, 5:2, 6:1 };
+
+// === REKORDOK ===
+function getRecordKey(level) {
+    return "mergb_record_" + level;
+}
+function loadRecord(level) {
+    return parseInt(localStorage.getItem(getRecordKey(level)) || "0");
+}
+function saveRecord(level, value) {
+    localStorage.setItem(getRecordKey(level), value);
+}
+
+// === GOMBOK FRISSÍTÉSE ===
+function updateButtons() {
+    document.getElementById('easyBtn').innerHTML = `Könnyű (${loadRecord('easy')})`;
+    document.getElementById('mediumBtn').innerHTML = `Közepes (${loadRecord('medium')})`;
+    document.getElementById('hardBtn').innerHTML = `Nehéz (${loadRecord('hard')})`;
+}
+
+// === REKORD POPUP ===
+function showRecordPopup(newScore, oldRecord) {
+    document.getElementById("recordText").innerHTML =
+        `<b>ÚJ REKORD!</b><br><br>Pont: ${newScore}<br>Előző rekord: ${oldRecord}`;
+    document.getElementById("recordPopup").style.display = "flex";
+}
+function closeRecordPopup() {
+    document.getElementById("recordPopup").style.display = "none";
+}
+
+// === NEHÉZSÉG BEÁLLÍTÁSA ===
+function startGame(level) {
+    difficulty = level;
+
+    if (level === "easy") {
+        COLS = 6; ROWS = 8;
+        MAX_WHITE_LIFE = 25;
+        SWAP_PENALTY = 2;
+        score = 150;
+    }
+    else if (level === "medium") {
+        COLS = 8; ROWS = 12;
+        MAX_WHITE_LIFE = 20;
+        SWAP_PENALTY = 3;
+        score = 100;
+    }
+    else if (level === "hard") {
+        COLS = 10; ROWS = 16;
+        MAX_WHITE_LIFE = 15;
+        SWAP_PENALTY = 4;
+        score = 80;
+    }
+
+    canvas.width = COLS * CELL;
+    canvas.height = ROWS * CELL;
+
+    initGrid();
+    selected = null;
+    hoverInfo = null;
+    gameOverEl.style.display = "none";
+
+    scoreEl.textContent = score;
+    draw();
+}
+
+// === RGB FAIR START ===
+function initGrid() {
+    const total = COLS * ROWS;
+    const each = Math.floor(total / 3);
+
+    let pool = [];
+    for (let i=0; i<each; i++) pool.push(1);
+    for (let i=0; i<each; i++) pool.push(2);
+    for (let i=0; i<each; i++) pool.push(4);
+
+    while (pool.length < total) pool.push(BASE[Math.floor(Math.random()*3)]);
+
+    // Fisher–Yates shuffle
+    for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+
+    grid = [];
+    whiteLife = [];
+
+    let idx = 0;
+    for (let r=0; r<ROWS; r++) {
+        let row = [];
+        let lifeRow = [];
+        for (let c=0; c<COLS; c++) {
+            row.push(pool[idx++]);
+            lifeRow.push(0);
+        }
+        grid.push(row);
+        whiteLife.push(lifeRow);
+    }
+}
+
+// === SZÍNRAJZOLÁS ===
+function colorFromMask(m, life=MAX_WHITE_LIFE) {
+    if (m===0) return "#000";
+    if (m===7) {
+        const t = Math.max(0, Math.min(1, life / MAX_WHITE_LIFE));
+        const g = Math.floor(80 + t * 175);
+        return `rgb(${g},${g},${g})`;
+    }
+    const r = (m&1)?255:0;
+    const g = (m&2)?255:0;
+    const b = (m&4)?255:0;
+    return `rgb(${r},${g},${b})`;
+}
+
+// === RAJZOLÁS ===
+function draw() {
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    for (let r=0; r<ROWS; r++) {
+        for (let c=0; c<COLS; c++) {
+            const x = c*CELL;
+            const y = r*CELL;
+            const val = grid[r][c];
+
+            ctx.fillStyle = "#333";
+            ctx.fillRect(x,y,CELL,CELL);
+
+            if (val!==0) {
+                const life = (val===7 ? whiteLife[r][c] : MAX_WHITE_LIFE);
+                ctx.fillStyle = colorFromMask(val, life);
+                ctx.beginPath();
+                ctx.arc(x+CELL/2, y+CELL/2, CELL*0.35, 0, Math.PI*2);
+                ctx.fill();
+
+                if (val===3 || val===5 || val===6) {
+                    ctx.fillStyle = colorFromMask(missing[val]);
+                    ctx.beginPath();
+                    ctx.arc(x+CELL/2, y+CELL/2, CELL*0.12, 0, Math.PI*2);
+                    ctx.fill();
+                }
+
+                if (val===7) {
+                    ctx.fillStyle = "#000";
+                    ctx.font = "12px sans-serif";
+                    ctx.textAlign = "center";
+                    ctx.textBaseline = "middle";
+                    ctx.fillText(whiteLife[r][c], x+CELL/2, y+CELL/2);
+                }
+            }
+
+            ctx.strokeStyle = (selected && selected.row===r && selected.col===c) ? "#ff0" : "#555";
+            ctx.strokeRect(x,y,CELL,CELL);
+        }
+    }
+
+    // === TOOLTIP ===
+    if (hoverInfo) {
+        const { x, y, value, size, sumLife, mult } = hoverInfo;
+
+        const textLines = [
+            `Érték: ${value}`,
+            `Méret: ${size}`,
+            `Szorzó: ×${mult}`,
+            `Életösszeg: ${sumLife}`
+        ];
+
+        ctx.font = "13px sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "top";
+
+        const padding = 6;
+        const lineHeight = 16;
+        const width = 150;
+        const height = textLines.length * lineHeight + padding*2;
+
+        ctx.fillStyle = "rgba(0,0,0,0.8)";
+        ctx.fillRect(x, y - height - 10, width, height);
+
+        ctx.fillStyle = "#fff";
+        for (let i=0; i<textLines.length; i++) {
+            ctx.fillText(textLines[i], x + padding, y - height - 10 + padding + i*lineHeight);
+        }
+    }
+}
+
+// === SEGÉDFÜGGVÉNYEK ===
+function getCell(x,y) {
+    const col = Math.floor(x/CELL);
+    const row = Math.floor(y/CELL);
+    if (col<0||col>=COLS||row<0||row>=ROWS) return null;
+    return {row,col};
+}
+
+function canMerge(a,b) {
+    if (a===0 || b===0) return false;
+    if (a===7 || b===7) return false;
+    const merged = a|b;
+    return merged!==a && merged!==b;
+}
+
+function doMerge(r1,c1,r2,c2) {
+    const a = grid[r1][c1];
+    const b = grid[r2][c2];
+    const merged = a|b;
+
+    grid[r2][c2] = merged;
+    grid[r1][c1] = 0;
+
+    whiteLife[r1][c1] = 0;
+    whiteLife[r2][c2] = (merged===7 ? MAX_WHITE_LIFE : 0);
+
+    score += (merged===7 ? 2 : 1);
+
+    applyGravity();
+    collapseColumns();
+}
+
+function applyGravity() {
+    for (let c=0; c<COLS; c++) {
+        let stack = [];
+        let lifeStack = [];
+        for (let r=ROWS-1; r>=0; r--) {
+            if (grid[r][c]!==0) {
+                stack.push(grid[r][c]);
+                lifeStack.push(whiteLife[r][c]);
+            }
+        }
+        for (let r=ROWS-1; r>=0; r--) {
+            if (stack.length>0) {
+                grid[r][c] = stack.shift();
+                whiteLife[r][c] = lifeStack.shift();
+            } else {
+                grid[r][c] = 0;
+                whiteLife[r][c] = 0;
+            }
+        }
+    }
+}
+
+function collapseColumns() {
+    let newCols = [];
+    let newLifeCols = [];
+
+    for (let c = 0; c < COLS; c++) {
+        let empty = true;
+        for (let r = 0; r < ROWS; r++) {
+            if (grid[r][c] !== 0) { empty = false; break; }
+        }
+        if (!empty) {
+            let col = [];
+            let lifeCol = [];
+            for (let r = 0; r < ROWS; r++) {
+                col.push(grid[r][c]);
+                lifeCol.push(whiteLife[r][c]);
+            }
+            newCols.push(col);
+            newLifeCols.push(lifeCol);
+        }
+    }
+
+    while (newCols.length < COLS) {
+        newCols.push(new Array(ROWS).fill(0));
+        newLifeCols.push(new Array(ROWS).fill(0));
+    }
+
+    for (let c = 0; c < COLS; c++) {
+        for (let r = 0; r < ROWS; r++) {
+            grid[r][c] = newCols[c][r];
+            whiteLife[r][c] = newLifeCols[c][r];
+        }
+    }
+}
+
+function fadeWhites() {
+    let changed = false;
+
+    for (let r=0; r<ROWS; r++) {
+        for (let c=0; c<COLS; c++) {
+            if (grid[r][c] === 7) {
+                whiteLife[r][c]--;
+                if (whiteLife[r][c] <= 0) {
+                    grid[r][c] = 0;
+                    whiteLife[r][c] = 0;
+                    changed = true;
+                }
+            }
+        }
+    }
+
+    if (changed) {
+        applyGravity();
+        collapseColumns();
+    }
+}
+
+function noMovesLeft() {
+    for (let r1=0; r1<ROWS; r1++) {
+        for (let c1=0; c1<COLS; c1++) {
+            const a = grid[r1][c1];
+            if (a===0 || a===7) continue;
+
+            for (let dr=-1; dr<=1; dr++) {
+                for (let dc=-1; dc<=1; dc++) {
+                    if (dr===0 && dc===0) continue;
+                    const r2 = r1+dr;
+                    const c2 = c1+dc;
+                    if (r2<0||r2>=ROWS||c2<0||c2>=COLS) continue;
+
+                    const b = grid[r2][c2];
+                    if (b===0 || b===7) continue;
+
+                    if (canMerge(a,b)) return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+function finalPenalty() {
+    let penalty = 0;
+    for (let r=0; r<ROWS; r++) {
+        for (let c=0; c<COLS; c++) {
+            const v = grid[r][c];
+            if (v===1 || v===2 || v===4) penalty += 3;
+            else if (v===3 || v===5 || v===6) penalty += 2;
+            else if (v===7) penalty += 1;
+        }
+    }
+    return penalty;
+}
+
+function isBoardEmpty() {
+    for (let r=0; r<ROWS; r++) {
+        for (let c=0; c<COLS; c++) {
+            if (grid[r][c] !== 0) return false;
+        }
+    }
+    return true;
+}
+
+function endGame() {
+    const penalty = finalPenalty();
+    score -= penalty;
+
+    if (isBoardEmpty()) {
+        score += 100;
+        score *= 2;
+    }
+
+    scoreEl.textContent = score;
+    gameOverEl.style.display = "block";
+
+    const oldRecord = loadRecord(difficulty);
+    if (score > oldRecord) {
+        saveRecord(difficulty, score);
+        showRecordPopup(score, oldRecord);
+    }
+
+    updateButtons();
+}
+
+// === FEHÉR SZIGET ===
+function getWhiteCluster(row, col) {
+    if (grid[row][col] !== 7) return null;
+
+    let visited = Array.from({length:ROWS},()=>Array(COLS).fill(false));
+    let group = [];
+
+    function dfs(r,c) {
+        if (r<0||r>=ROWS||c<0||c>=COLS) return;
+        if (visited[r][c]) return;
+        if (grid[r][c] !== 7) return;
+        visited[r][c] = true;
+        group.push({r,c});
+        dfs(r+1,c);
+        dfs(r-1,c);
+        dfs(r,c+1);
+        dfs(r,c-1);
+    }
+
+    dfs(row,col);
+    return group;
+}
+
+function explodeWhiteAt(row, col) {
+    const group = getWhiteCluster(row, col);
+    if (!group) return;
+
+    let sumLife = 0;
+    for (let g of group) sumLife += whiteLife[g.r][g.c];
+
+    let size = group.length;
+    let mult = (size>=8 ? 4 : size>=5 ? 3 : size>=3 ? 2 : 1);
+    let value = sumLife * mult;
+
+    score += value;
+
+    for (let g of group) {
+        grid[g.r][g.c] = 0;
+        whiteLife[g.r][g.c] = 0;
+    }
+
+    applyGravity();
+    collapseColumns();
+    fadeWhites();
+    scoreEl.textContent = score;
+
+    if (score <= 0 || noMovesLeft()) endGame();
+}
+
+// === EGÉR MOZGÁS – TOOLTIP ===
+canvas.addEventListener('mousemove', e=>{
+    if (gameOverEl.style.display==="block") return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const cell = getCell(x,y);
+    if (!cell) { hoverInfo = null; draw(); return; }
+
+    const {row, col} = cell;
+
+    if (grid[row][col] !== 7) {
+        hoverInfo = null;
+        draw();
+        return;
+    }
+
+    const group = getWhiteCluster(row, col);
+    if (!group) { hoverInfo = null; draw(); return; }
+
+    let sumLife = 0;
+    for (let g of group) sumLife += whiteLife[g.r][g.c];
+
+    let size = group.length;
+    let mult = (size>=8 ? 4 : size>=5 ? 3 : size>=3 ? 2 : 1);
+    let value = sumLife * mult;
+
+    hoverInfo = {
+        x: col*CELL,
+        y: row*CELL,
+        sumLife,
+        size,
+        mult,
+        value
+    };
+
+    draw();
+});
+
+// BAL KLIKK
+canvas.addEventListener('click', e=>{
+    if (gameOverEl.style.display==="block") return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const cell = getCell(x,y);
+    if (!cell) return;
+
+    if (!selected) {
+        selected = cell;
+    } else {
+        const r1 = selected.row;
+        const c1 = selected.col;
+        const r2 = cell.row;
+        const c2 = cell.col;
+
+        const a = grid[r1][c1];
+        const b = grid[r2][c2];
+
+        if (r1===r2 && c1===c2) {
+            selected=null;
+        } else {
+            if (canMerge(a,b)) {
+                doMerge(r1,c1,r2,c2);
+            } else {
+                grid[r2][c2] = a;
+                grid[r1][c1] = b;
+
+                const lifeA = whiteLife[r1][c1];
+                const lifeB = whiteLife[r2][c2];
+                whiteLife[r2][c2] = lifeA;
+                whiteLife[r1][c1] = lifeB;
+
+                score -= SWAP_PENALTY;
+            }
+            selected=null;
+        }
+    }
+
+    fadeWhites();
+    scoreEl.textContent = score;
+    draw();
+
+    if (score <= 0 || noMovesLeft()) endGame();
+});
+
+// JOBB KLIKK – robbantás
+canvas.addEventListener('contextmenu', e=>{
+    e.preventDefault();
+    if (gameOverEl.style.display==="block") return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const cell = getCell(x,y);
+    if (!cell) return;
+
+    explodeWhiteAt(cell.row, cell.col);
+    hoverInfo = null;
+    draw();
+});
+
+// === MOBIL TÁMOGATÁS ===
+let touchStartX, touchStartY, touchStartTime;
+
+canvas.addEventListener('touchstart', e => {
+    e.preventDefault();
+    const touch = e.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    touchStartTime = Date.now();
+});
+
+canvas.addEventListener('touchend', e => {
+    e.preventDefault();
+    const touch = e.changedTouches[0];
+    const rect = canvas.getBoundingClientRect();
+    const x = touch.clientX - rect.left;
+    const y = touch.clientY - rect.top;
+    const cell = getCell(x, y);
+    if (!cell) return;
+
+    const deltaX = touch.clientX - touchStartX;
+    const deltaY = touch.clientY - touchStartY;
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    const duration = Date.now() - touchStartTime;
+
+    if (distance > 50) { // swipe
+        let dirX = 0, dirY = 0;
+        if (Math.abs(deltaX) > Math.abs(deltaY)) {
+            dirX = deltaX > 0 ? 1 : -1;
+        } else {
+            dirY = deltaY > 0 ? 1 : -1;
+        }
+        const targetRow = cell.row + dirY;
+        const targetCol = cell.col + dirX;
+        if (targetRow >= 0 && targetRow < ROWS && targetCol >= 0 && targetCol < COLS) {
+            const a = grid[cell.row][cell.col];
+            const b = grid[targetRow][targetCol];
+            if (canMerge(a, b)) {
+                doMerge(cell.row, cell.col, targetRow, targetCol);
+            } else {
+                grid[targetRow][targetCol] = a;
+                grid[cell.row][cell.col] = b;
+                const lifeA = whiteLife[cell.row][cell.col];
+                const lifeB = whiteLife[targetRow][targetCol];
+                whiteLife[targetRow][targetCol] = lifeA;
+                whiteLife[cell.row][cell.col] = lifeB;
+                score -= SWAP_PENALTY;
+            }
+            fadeWhites();
+            scoreEl.textContent = score;
+            draw();
+            if (score <= 0 || noMovesLeft()) endGame();
+        }
+    } else if (duration > 500) { // hosszú érintés, robbantás
+        explodeWhiteAt(cell.row, cell.col);
+        hoverInfo = null;
+        draw();
+    } else { // rövid érintés, kiválaszt
+        if (!selected) {
+            selected = cell;
+        } else {
+            const r1 = selected.row;
+            const c1 = selected.col;
+            const r2 = cell.row;
+            const c2 = cell.col;
+            const a = grid[r1][c1];
+            const b = grid[r2][c2];
+            if (r1 === r2 && c1 === c2) {
+                selected = null;
+            } else {
+                if (canMerge(a, b)) {
+                    doMerge(r1, c1, r2, c2);
+                } else {
+                    grid[r2][c2] = a;
+                    grid[r1][c1] = b;
+                    const lifeA = whiteLife[r1][c1];
+                    const lifeB = whiteLife[r2][c2];
+                    whiteLife[r2][c2] = lifeA;
+                    whiteLife[r1][c1] = lifeB;
+                    score -= SWAP_PENALTY;
+                }
+                selected = null;
+            }
+        }
+        fadeWhites();
+        scoreEl.textContent = score;
+        draw();
+        if (score <= 0 || noMovesLeft()) endGame();
+    }
+});
+
+initGrid();
+draw();
+updateButtons();
+</script>
+
+</body>
+</html>
