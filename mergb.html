@@ -150,23 +150,26 @@ function startGame(level) {
     difficulty = level;
 
     if (level === "easy") {
-        COLS = 6; ROWS = 8;
+        COLS = 6; ROWS = 6;
         MAX_WHITE_LIFE = 25;
         SWAP_PENALTY = 2;
         score = 150;
     }
     else if (level === "medium") {
-        COLS = 8; ROWS = 12;
+        COLS = 7; ROWS = 9;
         MAX_WHITE_LIFE = 20;
         SWAP_PENALTY = 3;
         score = 100;
     }
     else if (level === "hard") {
-        COLS = 10; ROWS = 16;
+        COLS = 9; ROWS = 12;
         MAX_WHITE_LIFE = 15;
         SWAP_PENALTY = 4;
         score = 80;
     }
+
+    // Dinamikus CELL méretezés mobilhoz
+    CELL = Math.max(20, Math.min(60, Math.floor(window.innerWidth / COLS)));
 
     canvas.width = COLS * CELL;
     canvas.height = ROWS * CELL;
@@ -223,7 +226,7 @@ function colorFromMask(m, life=MAX_WHITE_LIFE) {
         return `rgb(${g},${g},${g})`;
     }
     const r = (m&1)?255:0;
-    const g = (m&2)?255:0;
+    const g = (m&2)?180:0;
     const b = (m&4)?255:0;
     return `rgb(${r},${g},${b})`;
 }
@@ -244,14 +247,26 @@ function draw() {
             if (val!==0) {
                 const life = (val===7 ? whiteLife[r][c] : MAX_WHITE_LIFE);
                 ctx.fillStyle = colorFromMask(val, life);
+                // 3D-hatás: árnyék
+                ctx.shadowColor = 'rgba(0,0,0,0.3)';
+                ctx.shadowBlur = 4;
+                ctx.shadowOffsetX = 2;
+                ctx.shadowOffsetY = 2;
+                // Lekerekített téglalap
                 ctx.beginPath();
-                ctx.arc(x+CELL/2, y+CELL/2, CELL*0.35, 0, Math.PI*2);
+                ctx.roundRect(x + CELL*0.15, y + CELL*0.15, CELL*0.7, CELL*0.7, CELL*0.15);
                 ctx.fill();
+                // Árnyék visszaállítása
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
 
                 if (val===3 || val===5 || val===6) {
                     ctx.fillStyle = colorFromMask(missing[val]);
+                    // Kis lekerekített téglalap
                     ctx.beginPath();
-                    ctx.arc(x+CELL/2, y+CELL/2, CELL*0.12, 0, Math.PI*2);
+                    ctx.roundRect(x + CELL*0.44, y + CELL*0.44, CELL*0.12, CELL*0.12, CELL*0.06);
                     ctx.fill();
                 }
 
@@ -433,6 +448,15 @@ function noMovesLeft() {
     return true;
 }
 
+function hasWhite() {
+    for (let r=0; r<ROWS; r++) {
+        for (let c=0; c<COLS; c++) {
+            if (grid[r][c] === 7) return true;
+        }
+    }
+    return false;
+}
+
 function finalPenalty() {
     let penalty = 0;
     for (let r=0; r<ROWS; r++) {
@@ -522,7 +546,7 @@ function explodeWhiteAt(row, col) {
     fadeWhites();
     scoreEl.textContent = score;
 
-    if (score <= 0 || noMovesLeft()) endGame();
+    if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
 }
 
 // === EGÉR MOZGÁS – TOOLTIP ===
@@ -612,7 +636,7 @@ canvas.addEventListener('click', e=>{
     scoreEl.textContent = score;
     draw();
 
-    if (score <= 0 || noMovesLeft()) endGame();
+    if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
 });
 
 // JOBB KLIKK – robbantás
@@ -683,7 +707,7 @@ canvas.addEventListener('touchend', e => {
             fadeWhites();
             scoreEl.textContent = score;
             draw();
-            if (score <= 0 || noMovesLeft()) endGame();
+            if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
         }
     } else if (duration > 500) { // hosszú érintés, robbantás
         explodeWhiteAt(cell.row, cell.col);
@@ -719,7 +743,7 @@ canvas.addEventListener('touchend', e => {
         fadeWhites();
         scoreEl.textContent = score;
         draw();
-        if (score <= 0 || noMovesLeft()) endGame();
+        if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
     }
 });
 
