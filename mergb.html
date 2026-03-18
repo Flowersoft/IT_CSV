@@ -66,6 +66,27 @@
     #recordBox button:hover {
         background: #555;
     }
+
+    /* === AKTUÁLIS INFO BOX === */
+    #infoBox {
+        margin-top: 10px;
+        padding: 10px 15px;
+        background: #222;
+        color: #aaa;
+        border: 1px solid #555;
+        border-radius: 5px;
+        font-size: 14px;
+        min-height: 60px;
+        display: block;
+        visibility: hidden;
+    }
+    #infoBox.active {
+        display: block;
+        visibility: visible;
+    }
+    #infoBox p {
+        margin: 3px 0;
+    }
 </style>
 </head>
 <body>
@@ -80,6 +101,8 @@
 </div>
 
 <p>Pont: <span id="score">0</span></p>
+
+<div id="infoBox"></div>
 
 <div id="gameover">Vége a játéknak!</div>
 
@@ -331,14 +354,28 @@ function draw() {
 
     // === TOOLTIP ===
     if (hoverInfo) {
-        const { x, y, value, size, sumLife, mult } = hoverInfo;
+        return; // Ha van infó, azt a külön info box mutatja, így nem rajzolunk plusz tooltipet a vászonra
+        let textLines = [];
+        const { x, y, isAction } = hoverInfo;
 
-        const textLines = [
-            `Érték: ${value}`,
-            `Méret: ${size}`,
-            `Szorzó: ×${mult}`,
-            `Életösszeg: ${sumLife}`
-        ];
+        if (isAction) {
+            // Várható érték tooltip (merge/swap)
+            const { expectedValue, moveType, dist } = hoverInfo;
+            textLines = [
+                `Típus: ${moveType}`,
+                `Távolság: ${dist}`,
+                `Érték: ${expectedValue > 0 ? '+' : ''}${expectedValue}`
+            ];
+        } else {
+            // Fehér robbanás tooltip
+            const { value, size, sumLife, mult } = hoverInfo;
+            textLines = [
+                `Érték: ${value}`,
+                `Méret: ${size}`,
+                `Szorzó: ×${mult}`,
+                `Életösszeg: ${sumLife}`
+            ];
+        }
 
         ctx.font = "13px sans-serif";
         ctx.textAlign = "left";
@@ -604,6 +641,35 @@ function explodeWhiteAt(row, col) {
 }
 
 // === EGÉR MOZGÁS – TOOLTIP ===
+function updateInfoBox(hoverInfo) {
+    const infoBox = document.getElementById('infoBox');
+    if (!hoverInfo) {
+        infoBox.classList.remove('active');
+        return;
+    }
+
+    let html = '';
+    if (hoverInfo.isAction) {
+        const { expectedValue, moveType, dist } = hoverInfo;
+        html = `
+            <p><strong>${moveType}</strong></p>
+            <p>Távolság: ${dist}</p>
+            <p>Érték: <span style="color: ${expectedValue > 0 ? '#0f0' : '#f44'}">${expectedValue > 0 ? '+' : ''}${expectedValue}</span></p>
+        `;
+    } else {
+        const { value, size, sumLife, mult } = hoverInfo;
+        html = `
+            <p><strong>Fehér robbanás</strong></p>
+            <p>Érték: ${value}</p>
+            <p>Méret: ${size} (×${mult})</p>
+            <!-- <p>Életösszeg: ${sumLife}</p> -->
+        `;
+    }
+
+    infoBox.innerHTML = html;
+    infoBox.classList.add('active');
+}
+
 canvas.addEventListener('mousemove', e=>{
     if (gameOverEl.style.display==="block") return;
 
@@ -612,18 +678,69 @@ canvas.addEventListener('mousemove', e=>{
     const y = e.clientY - rect.top;
 
     const cell = getCell(x,y);
-    if (!cell) { hoverInfo = null; draw(); return; }
+    if (!cell) { 
+        hoverInfo = null; 
+        updateInfoBox(null);
+        draw(); 
+        return; 
+    }
 
     const {row, col} = cell;
 
+    // === KIVÁLASZTOTT MEZZŐVEL – VÁRHATÓ ÉRTÉK ===
+    if (selected && !(selected.row === row && selected.col === col)) {
+        const r1 = selected.row;
+        const c1 = selected.col;
+        const r2 = row;
+        const c2 = col;
+
+        const a = grid[r1][c1];
+        const b = grid[r2][c2];
+
+        let expectedValue = 0;
+        let moveType = "";
+
+        if (canMerge(a,b)) {
+            const merged = a|b;
+            const mergeValue = (merged===7 ? SECONDARY_MERGE : PRIMARY_MERGE);
+            const dist = Math.abs(r1-r2) + Math.abs(c1-c2);
+            expectedValue = mergeValue * dist * DIST_PENALTY;
+            moveType = (merged===7 ? "Fehér merge" : "Normál merge");
+        } else if (a!==0 && b!==0) {
+            const dist = Math.abs(r1-r2) + Math.abs(c1-c2);
+            expectedValue = SIMPLE_SWAP * dist * DIST_PENALTY;
+            moveType = "Csere";
+        }
+
+        hoverInfo = {
+            x: col*CELL,
+            y: row*CELL,
+            expectedValue: Math.round(expectedValue),
+            moveType: moveType,
+            dist: Math.abs(r1-r2) + Math.abs(c1-c2),
+            isAction: true
+        };
+
+        updateInfoBox(hoverInfo);
+        draw();
+        return;
+    }
+
+    // === FEHÉR SZIGET TOOLTIP ===
     if (grid[row][col] !== 7) {
         hoverInfo = null;
+        updateInfoBox(null);
         draw();
         return;
     }
 
     const group = getWhiteCluster(row, col);
-    if (!group) { hoverInfo = null; draw(); return; }
+    if (!group) { 
+        hoverInfo = null; 
+        updateInfoBox(null);
+        draw(); 
+        return; 
+    }
 
     let sumLife = 0;
     for (let g of group) sumLife += whiteLife[g.r][g.c];
@@ -638,9 +755,11 @@ canvas.addEventListener('mousemove', e=>{
         sumLife,
         size,
         mult,
-        value
+        value,
+        isAction: false
     };
 
+    updateInfoBox(hoverInfo);
     draw();
 });
 
@@ -688,6 +807,8 @@ canvas.addEventListener('click', e=>{
 
     fadeWhites();
     scoreEl.textContent = Math.round(score);
+    hoverInfo = null;
+    updateInfoBox(null);
     draw();
 
     if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
@@ -707,6 +828,7 @@ canvas.addEventListener('contextmenu', e=>{
 
     explodeWhiteAt(cell.row, cell.col);
     hoverInfo = null;
+    updateInfoBox(null);
     draw();
 });
 
@@ -719,6 +841,38 @@ canvas.addEventListener('touchstart', e => {
     touchStartX = touch.clientX;
     touchStartY = touch.clientY;
     touchStartTime = Date.now();
+});
+
+canvas.addEventListener('touchmove', e => {
+    e.preventDefault();
+    if (gameOverEl.style.display==="block") return;
+    if (!selected) {
+        // Mutat infót az éppen érintett mező alatt
+        const touch = e.touches[0];
+        const rect = canvas.getBoundingClientRect();
+        const x = touch.clientX - rect.left;
+        const y = touch.clientY - rect.top;
+        const cell = getCell(x, y);
+        if (!cell) {
+            hoverInfo = null;
+            updateInfoBox(null);
+            return;
+        }
+
+        const {row, col} = cell;
+        if (grid[row][col] === 7) {
+            const group = getWhiteCluster(row, col);
+            if (group) {
+                let sumLife = 0;
+                for (let g of group) sumLife += whiteLife[g.r][g.c];
+                let size = group.length;
+                let mult = (size>=8 ? 4 : size>=5 ? 3 : size>=3 ? 2 : 1);
+                let value = sumLife * mult;
+                hoverInfo = {x: col*CELL, y: row*CELL, sumLife, size, mult, value, isAction: false};
+                updateInfoBox(hoverInfo);
+            }
+        }
+    }
 });
 
 canvas.addEventListener('touchend', e => {
@@ -796,6 +950,8 @@ canvas.addEventListener('touchend', e => {
         }
         fadeWhites();
         scoreEl.textContent = Math.round(score);
+        hoverInfo = null;
+        updateInfoBox(null);
         draw();
         if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
     }
