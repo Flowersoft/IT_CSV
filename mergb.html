@@ -104,7 +104,11 @@ let ROWS = 12;
 let CELL = 40;
 
 let MAX_WHITE_LIFE = 20;
-let SWAP_PENALTY = 3;
+let SIMPLE_SWAP = -3;
+let DIST_PENALTY = 1;
+let PRIMARY_MERGE = 1;
+let SECONDARY_MERGE = 2;
+let lastWhiteExplosionValue = 0;
 
 let grid = [];
 let whiteLife = [];
@@ -183,20 +187,29 @@ function startGame(level) {
 
     if (level === "easy") {
         COLS = 6; ROWS = 6;
-        MAX_WHITE_LIFE = 25;
-        SWAP_PENALTY = 2;
-        score = 150;
+        MAX_WHITE_LIFE = 24;
+        SIMPLE_SWAP = -3;
+        DIST_PENALTY = 1;
+        PRIMARY_MERGE = -2;
+        SECONDARY_MERGE = -1;
+        score = 50;
     }
     else if (level === "medium") {
         COLS = 7; ROWS = 9;
-        MAX_WHITE_LIFE = 20;
-        SWAP_PENALTY = 3;
+        MAX_WHITE_LIFE = 36;
+        SIMPLE_SWAP = -5;
+        DIST_PENALTY = 1.5;
+        PRIMARY_MERGE = -3;
+        SECONDARY_MERGE = -2;
         score = 100;
     }
     else if (level === "hard") {
         COLS = 9; ROWS = 12;
-        MAX_WHITE_LIFE = 15;
-        SWAP_PENALTY = 4;
+        MAX_WHITE_LIFE = 48;
+        SIMPLE_SWAP = -7;
+        DIST_PENALTY = 2;
+        PRIMARY_MERGE = -4;
+        SECONDARY_MERGE = -3;
         score = 80;
     }
 
@@ -211,7 +224,7 @@ function startGame(level) {
     hoverInfo = null;
     gameOverEl.style.display = "none";
 
-    scoreEl.textContent = score;
+    scoreEl.textContent = Math.round(score);
     draw();
 }
 
@@ -372,7 +385,9 @@ function doMerge(r1,c1,r2,c2) {
     whiteLife[r1][c1] = 0;
     whiteLife[r2][c2] = (merged===7 ? MAX_WHITE_LIFE : 0);
 
-    score += (merged===7 ? 2 : 1);
+    const mergeValue = (merged===7 ? SECONDARY_MERGE : PRIMARY_MERGE);
+    const dist = Math.abs(r1-r2) + Math.abs(c1-c2);
+    score += mergeValue * dist * DIST_PENALTY;
 
     applyGravity();
     collapseColumns();
@@ -380,7 +395,7 @@ function doMerge(r1,c1,r2,c2) {
 
 function applySwapPenalty(r1,c1,r2,c2) {
     const dist = Math.abs(r1-r2) + Math.abs(c1-c2);
-    score -= (SWAP_PENALTY + dist);
+    score += SIMPLE_SWAP * dist * DIST_PENALTY;
 }
 
 function applyGravity() {
@@ -521,17 +536,18 @@ function endGame() {
     score -= penalty;
 
     if (isBoardEmpty()) {
-        score += 100;
+        score += lastWhiteExplosionValue * 2;
         score *= 2;
     }
 
-    scoreEl.textContent = score;
+    const roundedScore = Math.round(score);
+    scoreEl.textContent = roundedScore;
     gameOverEl.style.display = "block";
 
     const oldRecord = loadRecord(difficulty);
-    if (score > oldRecord) {
-        saveRecord(difficulty, score);
-        showRecordPopup(score, oldRecord);
+    if (roundedScore > oldRecord) {
+        saveRecord(difficulty, roundedScore);
+        showRecordPopup(roundedScore, oldRecord);
     }
 
     updateButtons();
@@ -572,6 +588,7 @@ function explodeWhiteAt(row, col) {
     let value = sumLife * mult;
 
     score += value;
+    lastWhiteExplosionValue = value;
 
     for (let g of group) {
         grid[g.r][g.c] = 0;
@@ -581,7 +598,7 @@ function explodeWhiteAt(row, col) {
     applyGravity();
     collapseColumns();
     fadeWhites();
-    scoreEl.textContent = score;
+    scoreEl.textContent = Math.round(score);
 
     if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
 }
@@ -670,7 +687,7 @@ canvas.addEventListener('click', e=>{
     }
 
     fadeWhites();
-    scoreEl.textContent = score;
+    scoreEl.textContent = Math.round(score);
     draw();
 
     if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
@@ -742,7 +759,7 @@ canvas.addEventListener('touchend', e => {
                 applySwapPenalty(cell.row, cell.col, targetRow, targetCol);
             }
             fadeWhites();
-            scoreEl.textContent = score;
+            scoreEl.textContent = Math.round(score);
             draw();
             if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
         }
@@ -778,7 +795,7 @@ canvas.addEventListener('touchend', e => {
             }
         }
         fadeWhites();
-        scoreEl.textContent = score;
+        scoreEl.textContent = Math.round(score);
         draw();
         if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
     }
