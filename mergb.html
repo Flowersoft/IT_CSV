@@ -1208,12 +1208,17 @@ canvas.addEventListener('touchmove', e => {
     e.preventDefault();
     if (gameOverEl.style.display==="block") return;
     if (!selected) {
-        // Mutat infót az éppen érintett mező alatt
         const touch = e.touches[0];
         const rect = canvas.getBoundingClientRect();
-        const x = touch.clientX - rect.left;
-        const y = touch.clientY - rect.top;
+
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+
+        const x = (touch.clientX - rect.left) * scaleX;
+        const y = (touch.clientY - rect.top) * scaleY;
+
         const cell = getCell(x, y);
+
         if (!cell) {
             hoverInfo = null;
             updateInfoBox(null);
@@ -1239,16 +1244,22 @@ canvas.addEventListener('touchmove', e => {
 canvas.addEventListener('touchend', e => {
     e.preventDefault();
     const touch = e.changedTouches[0];
+
     const rect = canvas.getBoundingClientRect();
-    const x = touch.clientX - rect.left;
-    const y = touch.clientY - rect.top;
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const x = (touch.clientX - rect.left) * scaleX;
+    const y = (touch.clientY - rect.top) * scaleY;
     const cell = getCell(x, y);
     if (!cell) return;
 
+    // swipe irány/távolság: EZ marad clientX/Y alapú
     const deltaX = touch.clientX - touchStartX;
     const deltaY = touch.clientY - touchStartY;
     const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
     const duration = Date.now() - touchStartTime;
+
 
     if (distance > 50) { // swipe
         let dirX = 0, dirY = 0;
