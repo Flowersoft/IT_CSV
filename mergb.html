@@ -17,11 +17,19 @@
         cursor: pointer;
     }
     #gameover {
-        margin-top: 10px;
-        font-size: 20px;
-        color: #ff6666;
-        display: none;
-    }
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 32px;
+    color: #ff6666;
+    background: rgba(0,0,0,0.7);
+    padding: 20px 30px;
+    border-radius: 10px;
+    display: none;
+    z-index: 999;
+    pointer-events: none;
+}
     .menu button {
         margin: 5px;
         padding: 10px 20px;
@@ -94,6 +102,9 @@
 <h1>meRGB</h1>
 
 <div class="menu">
+    <label style="color:#ccc; font-size:14px;">
+        <input type="checkbox" id="timeModeChk">Időmód
+    </label>
     <button id="easyBtn" onclick="startGame('easy')">Könnyű</button>
     <button id="mediumBtn" onclick="startGame('medium')">Közepes</button>
     <button id="hardBtn" onclick="startGame('hard')">Nehéz</button>
@@ -104,9 +115,10 @@
 
 <div id="infoBox"></div>
 
-<div id="gameover">Vége a játéknak!</div>
-
-<canvas id="game"></canvas>
+<div style="position: relative; display: inline-block;">
+    <canvas id="game"></canvas>
+    <div id="gameover">Vége a játéknak!</div>
+</div>
 
 <!-- === REKORD POPUP === -->
 <div id="recordPopup">
@@ -122,32 +134,60 @@ const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const gameOverEl = document.getElementById('gameover');
 
-let COLS = 8;
-let ROWS = 12;
+let COLS = 2;
+let ROWS = 2;
 let CELL = 40;
 
-let MAX_WHITE_LIFE = 20;
-let SIMPLE_SWAP = -3;
-let DIST_PENALTY = 1;
-let PRIMARY_MERGE = 1;
-let SECONDARY_MERGE = 2;
+let WHITE_LIFE = 99;
+let MERGED_LIFE = 99;
+let SIMPLE_SWAP = 0;
+let DIST_PENALTY = 0;
+let PRIMARY_MERGE = 0;
+let SECONDARY_MERGE = 0;
+let LIFE_CYCLE_MS = 1000;
+
+let score = 1;
+
 let lastWhiteExplosionValue = 0;
+
+let timeMode = false;
+let timeModeActive = false;
+let timeInterval = null;
+let microTick = 0;
 
 let grid = [];
 let whiteLife = [];
-let score = 0;
+let mergedLife = [];
 let selected = null;
 let hoverInfo = null;
+let difficulty = "base";
+let help = true;
 
-let difficulty = "medium";
-
-// === RGB ALAPSZÍNEK ===
 const BASE = [1,2,4];
 const missing = { 3:4, 5:2, 6:1 };
 
-// === REKORDOK ===
+function updateHelp() {
+    if (difficulty === "easy" || difficulty === "base") {
+        help = true;
+        return;
+    }
+    if (difficulty === "hard") {
+        help = false;
+        return;
+    }
+    // Medium: help visible only until the board is about half empty
+    const total = ROWS * COLS;
+    let filled = 0;
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (grid[r][c] !== 0) filled++;
+        }
+    }
+    help = filled > total / 2;
+}
+
 function getRecordKey(level) {
-    return "mergb_record_" + level;
+    return "mergb_record_" + level + (timeModeActive ? "_time" : "");
 }
 
 function setCookie(name, value, days) {
@@ -180,59 +220,68 @@ function saveRecord(level, value) {
 
 function resetRecords() {
     ["easy", "medium", "hard"].forEach(level => {
-        const key = getRecordKey(level);
-        localStorage.removeItem(key);
-        deleteCookie(key);
+        const key1 = "mergb_record_" + level;
+        const key2 = "mergb_record_" + level + "_time";
+        localStorage.removeItem(key1);
+        localStorage.removeItem(key2);
+        deleteCookie(key1);
+        deleteCookie(key2);
     });
     updateButtons();
 }
 
-// === GOMBOK FRISSÍTÉSE ===
 function updateButtons() {
-    document.getElementById('easyBtn').innerHTML = `Könnyű (${loadRecord('easy')})`;
-    document.getElementById('mediumBtn').innerHTML = `Közepes (${loadRecord('medium')})`;
-    document.getElementById('hardBtn').innerHTML = `Nehéz (${loadRecord('hard')})`;
+    document.getElementById('easyBtn').innerHTML =
+        `Könnyű (${loadRecord('easy')} / ${loadRecord('easy_time')})`;
+    document.getElementById('mediumBtn').innerHTML =
+        `Közepes (${loadRecord('medium')} / ${loadRecord('medium_time')})`;
+    document.getElementById('hardBtn').innerHTML =
+        `Nehéz (${loadRecord('hard')} / ${loadRecord('hard_time')})`;
 }
 
-// === REKORD POPUP ===
 function showRecordPopup(newScore, oldRecord) {
     document.getElementById("recordText").innerHTML =
         `<b>ÚJ REKORD!</b><br><br>Pont: ${newScore}<br>Előző rekord: ${oldRecord}`;
     document.getElementById("recordPopup").style.display = "flex";
 }
+
 function closeRecordPopup() {
     document.getElementById("recordPopup").style.display = "none";
 }
 
-// === NEHÉZSÉG BEÁLLÍTÁSA ===
 function startGame(level) {
     difficulty = level;
-
     if (level === "easy") {
         COLS = 6; ROWS = 6;
-        MAX_WHITE_LIFE = 24;
+        WHITE_LIFE = 24;
         SIMPLE_SWAP = -3;
         DIST_PENALTY = 1;
         PRIMARY_MERGE = -2;
         SECONDARY_MERGE = -1;
+        MERGED_LIFE = 15;
+        LIFE_CYCLE_MS = 10000;
         score = 50;
     }
     else if (level === "medium") {
         COLS = 7; ROWS = 9;
-        MAX_WHITE_LIFE = 36;
+        WHITE_LIFE = 36;
         SIMPLE_SWAP = -5;
         DIST_PENALTY = 1.5;
         PRIMARY_MERGE = -3;
         SECONDARY_MERGE = -2;
+        MERGED_LIFE = 10;
+        LIFE_CYCLE_MS = 8000;
         score = 100;
     }
     else if (level === "hard") {
         COLS = 9; ROWS = 12;
-        MAX_WHITE_LIFE = 48;
+        WHITE_LIFE = 48;
         SIMPLE_SWAP = -7;
         DIST_PENALTY = 2;
         PRIMARY_MERGE = -4;
         SECONDARY_MERGE = -3;
+        MERGED_LIFE = 5;
+        LIFE_CYCLE_MS = 5000;
         score = 80;
     }
 
@@ -248,10 +297,125 @@ function startGame(level) {
     gameOverEl.style.display = "none";
 
     scoreEl.textContent = Math.round(score);
+
+    if (timeInterval) {
+        clearInterval(timeInterval);
+        timeInterval = null;
+        microTick = 0;
+    }
+
+    timeMode = document.getElementById("timeModeChk").checked;
+    timeModeActive = timeMode;
+
+    if (timeMode) {
+        startTimeDecay();
+    }
+
     draw();
 }
 
-// === RGB FAIR START ===
+function startTimeDecay() {
+    timeInterval = setInterval(() => {
+        timeTick();
+    }, LIFE_CYCLE_MS / 10);
+}
+
+function timeTick() {
+    
+    let changed = false;
+
+    if(microTick == 9) {
+        // 1) Fehérek öregítése
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                if (grid[r][c] === 7 && whiteLife[r][c] > 0) {
+                    whiteLife[r][c]--;
+                    if (whiteLife[r][c] === 0) {
+                        grid[r][c] = 0;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        // 2) Másodlagosak öregítése + bomlás
+        for (let r = 0; r < ROWS; r++) {
+            for (let c = 0; c < COLS; c++) {
+                const val = grid[r][c];
+                if ((val === 3 || val === 5 || val === 6) && mergedLife[r][c] > 0) {
+                    mergedLife[r][c]--;
+                    if (mergedLife[r][c] === 0) {
+                        dissolveOne(r, c, val);
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        // 3) Ha bármi változott → gravitáció + balra-záródás + újrarajzolás
+        if (changed) {
+            applyGravity();
+            collapseColumns();
+        }
+        score += SIMPLE_SWAP; // időalapú pontlevonás 
+    }
+
+    microTick++;
+    if(microTick > 9) microTick = 0;
+    scoreEl.textContent = Math.round(score);
+    // === GAME OVER ELLENŐRZÉS ===
+    if (score <= 0 || (noMovesLeft() && !hasWhite())) {
+        endGame();
+        return; // fontos, hogy ne fusson tovább
+    }
+    draw();
+}
+
+function dissolveOne(r, c, val) {
+    score += PRIMARY_MERGE; // pontlevonás a PRIMARY_MERGE alapján
+
+    const color1 = (val === 3 ? 1 : val === 5 ? 1 : 2);
+    const color2 = (val === 3 ? 2 : val === 5 ? 4 : 4);
+
+    grid[r][c] = color1;
+    mergedLife[r][c] = 0;
+    whiteLife[r][c] = 0;
+
+    const dirs = [
+        { dr: -1, dc: 1 }, { dr: -1, dc: 0 }, { dr: 0, dc: 1 },
+        { dr: 1, dc: -1 }, { dr: 1, dc: 0 }, { dr: 0, dc: -1 }
+    ];
+
+    for (const d of dirs) {
+        const nr = r + d.dr;
+        const nc = c + d.dc;
+        if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && grid[nr][nc] === 0) {
+            grid[nr][nc] = color2;
+            return;
+        }
+    }
+
+    // ha nincs közeli üres → BFS
+    let queue = [{ r, c }];
+    let visited = new Set([`${r},${c}`]);
+
+    while (queue.length > 0) {
+        const { r: qr, c: qc } = queue.shift();
+        for (const d of dirs) {
+            const nr = qr + d.dr;
+            const nc = qc + d.dc;
+            const key = `${nr},${nc}`;
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && !visited.has(key)) {
+                visited.add(key);
+                if (grid[nr][nc] === 0) {
+                    grid[nr][nc] = color2;
+                    return;
+                }
+                queue.push({ r: nr, c: nc });
+            }
+        }
+    }
+}
+
 function initGrid() {
     const total = COLS * ROWS;
     const each = Math.floor(total / 3);
@@ -271,40 +435,77 @@ function initGrid() {
 
     grid = [];
     whiteLife = [];
+    mergedLife = [];
 
     let idx = 0;
     for (let r=0; r<ROWS; r++) {
         let row = [];
         let lifeRow = [];
+        let mergeRow = [];
         for (let c=0; c<COLS; c++) {
             row.push(pool[idx++]);
             lifeRow.push(0);
+            mergeRow.push(0);
         }
         grid.push(row);
         whiteLife.push(lifeRow);
+        mergedLife.push(mergeRow);
     }
 }
 
-// === SZÍNRAJZOLÁS ===
-function colorFromMask(m, life=MAX_WHITE_LIFE) {
-    if (m===0) return "#000";
-    if (m===7) {
-        const t = Math.max(0, Math.min(1, life / MAX_WHITE_LIFE));
-        const g = Math.floor(80 + t * 175);
+function colorFromMask(m, whiteLifeValue = WHITE_LIFE, mergedLifeValue = null) {
+    if (m === 0) return "#000";
+
+    // === KÖZÖS HÁTTÉRSZÜRKE ALAPSZINT ===
+    const BG = 80;  // ugyanaz a minimum tónus, mint a fehérnél
+
+    // === FEHÉR HALVÁNYODÁS ===
+    if (m === 7) {
+        const t = Math.max(0, Math.min(1, whiteLifeValue / WHITE_LIFE));
+        const g = Math.floor(BG + t * (255 - BG));
         return `rgb(${g},${g},${g})`;
     }
-    const r = (m&1)?255:0;
-    const g = (m&2)?180:0;
-    const b = (m&4)?255:0;
+
+    // === ALAPSZÍNEK (R, G, B) ===
+    let r = (m & 1) ? 255 : 0;
+    let g = (m & 2) ? 180 : 0;
+    let b = (m & 4) ? 255 : 0;
+
+    // === MÁSODLAGOS HALVÁNYODÁS (3, 5, 6) ===
+    if (mergedLifeValue !== null) {
+        const t = Math.max(0, Math.min(1, mergedLifeValue / MERGED_LIFE));
+
+        // háttérszürke felé halványítás (ugyanaz a logika, mint a fehérnél)
+        r = Math.floor(BG + (r - BG) * t);
+        g = Math.floor(BG + (g - BG) * t);
+        b = Math.floor(BG + (b - BG) * t);
+    }
+
     return `rgb(${r},${g},${b})`;
 }
 
-// === RAJZOLÁS ===
+function getBorderColor() {
+    const t = microTick / 9; // 0.0 → 1.0
+
+    const r = Math.floor(80 + t * (255 - 80)); // 80 → 255
+    const g = Math.floor(80 * (1 - t));        // 80 → 0
+    const b = Math.floor(80 * (1 - t));        // 80 → 0
+
+    return `rgb(${r},${g},${b})`;
+}
+
 function draw() {
     ctx.clearRect(0,0,canvas.width,canvas.height);
+    updateHelp();
 
     for (let r=0; r<ROWS; r++) {
         for (let c=0; c<COLS; c++) {
+            
+            ctx.shadowColor = 'transparent';
+            ctx.shadowBlur = 0;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 0;
+            
             const x = c*CELL;
             const y = r*CELL;
             const val = grid[r][c];
@@ -313,44 +514,60 @@ function draw() {
             ctx.fillRect(x,y,CELL,CELL);
 
             if (val!==0) {
-                const life = (val===7 ? whiteLife[r][c] : MAX_WHITE_LIFE);
-                ctx.fillStyle = colorFromMask(val, life);
+                const life = (val===7 ? whiteLife[r][c] : WHITE_LIFE);
+                const ml = (val === 3 || val === 5 || val === 6) ? mergedLife[r][c] : null;
+                ctx.fillStyle = colorFromMask(val, life, ml);
                 // 3D-hatás: árnyék
                 ctx.shadowColor = 'rgba(0,0,0,0.3)';
                 ctx.shadowBlur = 4;
                 ctx.shadowOffsetX = 2;
                 ctx.shadowOffsetY = 2;
-                // Lekerekített téglalap
+
                 ctx.beginPath();
-                ctx.roundRect(x + CELL*0.15, y + CELL*0.15, CELL*0.7, CELL*0.7, CELL*0.15);
+                const cp = 0.12;
+                ctx.roundRect(x + CELL*cp, y + CELL*cp, CELL*(1-2*cp), CELL*(1-2*cp), CELL*cp*2);
                 ctx.fill();
-                // Árnyék visszaállítása
+
                 ctx.shadowColor = 'transparent';
                 ctx.shadowBlur = 0;
                 ctx.shadowOffsetX = 0;
                 ctx.shadowOffsetY = 0;
 
-                if (val===3 || val===5 || val===6) {
+                if (help && (val===3 || val===5 || val===6)) {
                     ctx.fillStyle = colorFromMask(missing[val]);
-                    // Kis lekerekített téglalap
-                    ctx.beginPath();
-                    ctx.roundRect(x + CELL*0.44, y + CELL*0.44, CELL*0.12, CELL*0.12, CELL*0.06);
-                    ctx.fill();
+                    const cornerSize = CELL * 0.15;
+                    const pad = CELL * 0.1;
+                    const corners = [
+                        {x: x + pad, y: y + pad},
+                        {x: x + CELL - cornerSize - pad, y: y + pad},
+                        {x: x + pad, y: y + CELL - cornerSize - pad},
+                        {x: x + CELL - cornerSize - pad, y: y + CELL - cornerSize - pad}
+                    ];
+                    for (const pos of corners) {
+                        ctx.beginPath();
+                        ctx.roundRect(pos.x, pos.y, cornerSize, cornerSize, cornerSize * 0.2);
+                        ctx.fill();
+                    }
                 }
 
-                if (val===7) {
-                    ctx.fillStyle = "#000";
-                    ctx.font = "12px sans-serif";
-                    ctx.textAlign = "center";
-                    ctx.textBaseline = "middle";
-                    ctx.fillText(whiteLife[r][c], x+CELL/2, y+CELL/2);
+                if (help && val === 7) {
+                    drawCenterCircleText(x, y, whiteLife[r][c]);
+                }
+
+                if (help && (val === 3 || val === 5 || val === 6)) {
+                drawCenterCircleText(x, y, mergedLife[r][c]);
                 }
             }
 
             ctx.strokeStyle = (selected && selected.row===r && selected.col===c) ? "#ff0" : "#555";
-            ctx.strokeRect(x,y,CELL,CELL);
+            ctx.lineWidth = 2 ;
+            ctx.strokeRect(x+2,y+2,CELL-4,CELL-4);
         }
     }
+
+    ctx.strokeStyle = getBorderColor();
+    ctx.lineWidth = 4;
+    ctx.strokeRect(0, 0, canvas.width, canvas.height);
 
     // === TOOLTIP ===
     if (hoverInfo) {
@@ -372,8 +589,8 @@ function draw() {
             textLines = [
                 `Érték: ${value}`,
                 `Méret: ${size}`,
-                `Szorzó: ×${mult}`,
-                `Életösszeg: ${sumLife}`
+                `Szorzó: ×${mult}`/*,
+                `Életösszeg: ${sumLife}`*/
             ];
         }
 
@@ -394,9 +611,22 @@ function draw() {
             ctx.fillText(textLines[i], x + padding, y - height - 10 + padding + i*lineHeight);
         }
     }
+
 }
 
-// === SEGÉDFÜGGVÉNYEK ===
+function drawCenterCircleText(x, y, text) {
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.arc(x + CELL/2, y + CELL/2, CELL * 0.15, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#fff";
+    ctx.font = "10px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, x + CELL/2, y + CELL/2);
+}
+
 function getCell(x,y) {
     const col = Math.floor(x/CELL);
     const row = Math.floor(y/CELL);
@@ -420,7 +650,15 @@ function doMerge(r1,c1,r2,c2) {
     grid[r1][c1] = 0;
 
     whiteLife[r1][c1] = 0;
-    whiteLife[r2][c2] = (merged===7 ? MAX_WHITE_LIFE : 0);
+    whiteLife[r2][c2] = (merged===7 ? WHITE_LIFE : 0);
+
+    // Merged (first-merge) life inicializálása
+    mergedLife[r1][c1] = 0;
+    if (merged === 3 || merged === 5 || merged === 6) {
+        mergedLife[r2][c2] = MERGED_LIFE;
+    } else {
+        mergedLife[r2][c2] = 0;
+    }
 
     const mergeValue = (merged===7 ? SECONDARY_MERGE : PRIMARY_MERGE);
     const dist = Math.abs(r1-r2) + Math.abs(c1-c2);
@@ -460,6 +698,7 @@ function applyGravity() {
 function collapseColumns() {
     let newCols = [];
     let newLifeCols = [];
+    let newMergeCols = [];
 
     for (let c = 0; c < COLS; c++) {
         let empty = true;
@@ -469,24 +708,29 @@ function collapseColumns() {
         if (!empty) {
             let col = [];
             let lifeCol = [];
+            let mergeCol = [];
             for (let r = 0; r < ROWS; r++) {
                 col.push(grid[r][c]);
                 lifeCol.push(whiteLife[r][c]);
+                mergeCol.push(mergedLife[r][c]);
             }
             newCols.push(col);
             newLifeCols.push(lifeCol);
+            newMergeCols.push(mergeCol);
         }
     }
 
     while (newCols.length < COLS) {
         newCols.push(new Array(ROWS).fill(0));
         newLifeCols.push(new Array(ROWS).fill(0));
+        newMergeCols.push(new Array(ROWS).fill(0));
     }
 
     for (let c = 0; c < COLS; c++) {
         for (let r = 0; r < ROWS; r++) {
             grid[r][c] = newCols[c][r];
             whiteLife[r][c] = newLifeCols[c][r];
+            mergedLife[r][c] = newMergeCols[c][r];
         }
     }
 }
@@ -501,6 +745,7 @@ function fadeWhites() {
                 if (whiteLife[r][c] <= 0) {
                     grid[r][c] = 0;
                     whiteLife[r][c] = 0;
+                    mergedLife[r][c] = 0;
                     changed = true;
                 }
             }
@@ -510,6 +755,107 @@ function fadeWhites() {
     if (changed) {
         applyGravity();
         collapseColumns();
+    }
+}
+
+function dissolveMerged() {
+    let dissolved = [];
+
+    // 1) Életciklus csökkentése és azonnali szétesés jelölése
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+
+            const val = grid[r][c];
+
+            // Csak másodlagos színek
+            if (val === 3 || val === 5 || val === 6) {
+
+                if (mergedLife[r][c] > 1) {
+                    // Még ketyeg az élet
+                    mergedLife[r][c]--;
+
+                } else if (mergedLife[r][c] === 1) {
+                    // *** MOST kell szétesnie ***
+                    dissolved.push({ r, c, val });
+                    mergedLife[r][c] = 0;
+
+                     // <<< PONTLEVONÁS ITT >>>
+                    score += PRIMARY_MERGE;
+                }
+            }
+        }
+    }
+
+    if (dissolved.length === 0) return;
+
+    // 2) Szétesés végrehajtása
+    for (const { r, c, val } of dissolved) {
+
+        // A két alapszín meghatározása
+        const color1 = (val === 3 ? 1 : val === 5 ? 1 : 2);
+        const color2 = (val === 3 ? 2 : val === 5 ? 4 : 4);
+
+        // Az eredeti helyre kerül az egyik
+        grid[r][c] = color1;
+        mergedLife[r][c] = 0;
+        whiteLife[r][c] = 0;
+
+        let placed = false;
+
+        // Szomszédos irányok, ahol próbáljuk elhelyezni a második színt
+        const dirs = [
+            { dr: -1, dc: 1 }, // felfelé-jobbra
+            { dr: -1, dc: 0 }, // felfelé
+            { dr: 0, dc: 1 },  // jobbra
+            { dr: 1, dc: -1 }, // lefelé-balra
+            { dr: 1, dc: 0 },  // lefelé
+            { dr: 0, dc: -1 }  // balra
+        ];
+
+        // 3) Közeli üres hely keresése
+        for (const dir of dirs) {
+            const nr = r + dir.dr;
+            const nc = c + dir.dc;
+
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && grid[nr][nc] === 0) {
+                grid[nr][nc] = color2;
+                mergedLife[nr][nc] = 0;
+                whiteLife[nr][nc] = 0;
+                placed = true;
+                break;
+            }
+        }
+
+        // 4) Ha nincs közeli üres, BFS-sel keresünk
+        if (!placed) {
+            let queue = [{ r, c, dist: 0 }];
+            let visited = new Set([`${r},${c}`]);
+
+            while (queue.length > 0 && !placed) {
+                const { r: qr, c: qc, dist } = queue.shift();
+                if (dist > 5) break;
+
+                for (const dir of dirs) {
+                    const nr = qr + dir.dr;
+                    const nc = qc + dir.dc;
+                    const key = `${nr},${nc}`;
+
+                    if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && !visited.has(key)) {
+                        visited.add(key);
+
+                        if (grid[nr][nc] === 0) {
+                            grid[nr][nc] = color2;
+                            mergedLife[nr][nc] = 0;
+                            whiteLife[nr][nc] = 0;
+                            placed = true;
+                            break;
+                        }
+
+                        queue.push({ r: nr, c: nc, dist: dist + 1 });
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -569,12 +915,20 @@ function isBoardEmpty() {
 }
 
 function endGame() {
+
+    if (timeInterval) {
+        clearInterval(timeInterval);
+        timeInterval = null;
+    }
+
     const penalty = finalPenalty();
     score -= penalty;
 
     if (isBoardEmpty()) {
         score += lastWhiteExplosionValue * 2;
-        score *= 2;
+        if (timeMode) {
+           score *= 2;
+        }
     }
 
     const roundedScore = Math.round(score);
@@ -590,7 +944,6 @@ function endGame() {
     updateButtons();
 }
 
-// === FEHÉR SZIGET ===
 function getWhiteCluster(row, col) {
     if (grid[row][col] !== 7) return null;
 
@@ -630,17 +983,20 @@ function explodeWhiteAt(row, col) {
     for (let g of group) {
         grid[g.r][g.c] = 0;
         whiteLife[g.r][g.c] = 0;
+        mergedLife[g.r][g.c] = 0;
     }
 
     applyGravity();
     collapseColumns();
     fadeWhites();
+    dissolveMerged();
+    applyGravity();
+    collapseColumns();
     scoreEl.textContent = Math.round(score);
 
     if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
 }
 
-// === EGÉR MOZGÁS – TOOLTIP ===
 function updateInfoBox(hoverInfo) {
     const infoBox = document.getElementById('infoBox');
     if (!hoverInfo) {
@@ -763,7 +1119,6 @@ canvas.addEventListener('mousemove', e=>{
     draw();
 });
 
-// BAL KLIKK
 canvas.addEventListener('click', e=>{
     if (gameOverEl.style.display==="block") return;
 
@@ -799,6 +1154,11 @@ canvas.addEventListener('click', e=>{
                 whiteLife[r2][c2] = lifeA;
                 whiteLife[r1][c1] = lifeB;
 
+                const mergedA = mergedLife[r1][c1];
+                const mergedB = mergedLife[r2][c2];
+                mergedLife[r2][c2] = mergedA;
+                mergedLife[r1][c1] = mergedB;
+
                 applySwapPenalty(r1, c1, r2, c2);
             }
             selected=null;
@@ -806,6 +1166,9 @@ canvas.addEventListener('click', e=>{
     }
 
     fadeWhites();
+    dissolveMerged();
+    applyGravity();
+    collapseColumns();
     scoreEl.textContent = Math.round(score);
     hoverInfo = null;
     updateInfoBox(null);
@@ -814,7 +1177,6 @@ canvas.addEventListener('click', e=>{
     if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
 });
 
-// JOBB KLIKK – robbantás
 canvas.addEventListener('contextmenu', e=>{
     e.preventDefault();
     if (gameOverEl.style.display==="block") return;
@@ -832,7 +1194,6 @@ canvas.addEventListener('contextmenu', e=>{
     draw();
 });
 
-// === MOBIL TÁMOGATÁS ===
 let touchStartX, touchStartY, touchStartTime;
 
 canvas.addEventListener('touchstart', e => {
@@ -910,9 +1271,16 @@ canvas.addEventListener('touchend', e => {
                 const lifeB = whiteLife[targetRow][targetCol];
                 whiteLife[targetRow][targetCol] = lifeA;
                 whiteLife[cell.row][cell.col] = lifeB;
+                const mergedA = mergedLife[cell.row][cell.col];
+                const mergedB = mergedLife[targetRow][targetCol];
+                mergedLife[targetRow][targetCol] = mergedA;
+                mergedLife[cell.row][cell.col] = mergedB;
                 applySwapPenalty(cell.row, cell.col, targetRow, targetCol);
             }
             fadeWhites();
+            dissolveMerged();
+            applyGravity();
+            collapseColumns();
             scoreEl.textContent = Math.round(score);
             draw();
             if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
@@ -943,12 +1311,19 @@ canvas.addEventListener('touchend', e => {
                     const lifeB = whiteLife[r2][c2];
                     whiteLife[r2][c2] = lifeA;
                     whiteLife[r1][c1] = lifeB;
+                    const mergedA = mergedLife[r1][c1];
+                    const mergedB = mergedLife[r2][c2];
+                    mergedLife[r2][c2] = mergedA;
+                    mergedLife[r1][c1] = mergedB;
                     applySwapPenalty(r1, c1, r2, c2);
                 }
                 selected = null;
             }
         }
         fadeWhites();
+        dissolveMerged();
+        applyGravity();
+        collapseColumns();
         scoreEl.textContent = Math.round(score);
         hoverInfo = null;
         updateInfoBox(null);
@@ -958,7 +1333,8 @@ canvas.addEventListener('touchend', e => {
 });
 
 initGrid();
-draw();
+startGame("base");
+//draw();
 updateButtons();
 </script>
 
