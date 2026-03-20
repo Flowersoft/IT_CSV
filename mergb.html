@@ -1273,6 +1273,7 @@ canvas.addEventListener('touchend', e => {
         if (targetRow >= 0 && targetRow < ROWS && targetCol >= 0 && targetCol < COLS) {
             const a = grid[cell.row][cell.col];
             const b = grid[targetRow][targetCol];
+            console.log(`Swipe from (${cell.row},${cell.col}) to (${targetRow},${targetCol}) - values: ${a} → ${b}`);
             if (canMerge(a, b)) {
                 doMerge(cell.row, cell.col, targetRow, targetCol);
             } else {
@@ -1342,6 +1343,7 @@ canvas.addEventListener('touchend', e => {
         if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
     }
 });
+
 
 initGrid();
 startGame("base");
