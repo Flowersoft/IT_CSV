@@ -652,20 +652,13 @@ function doMerge(r1,c1,r2,c2) {
     whiteLife[r1][c1] = 0;
     whiteLife[r2][c2] = (merged===7 ? WHITE_LIFE : 0);
 
-    // Merged (first-merge) life inicializálása
     mergedLife[r1][c1] = 0;
-    if (merged === 3 || merged === 5 || merged === 6) {
-        mergedLife[r2][c2] = MERGED_LIFE;
-    } else {
-        mergedLife[r2][c2] = 0;
-    }
+    mergedLife[r2][c2] = ((merged===3 || merged===5 || merged===6) ? MERGED_LIFE : 0);
 
     const mergeValue = (merged===7 ? SECONDARY_MERGE : PRIMARY_MERGE);
     const dist = Math.abs(r1-r2) + Math.abs(c1-c2);
     score += mergeValue * dist * DIST_PENALTY;
 
-    applyGravity();
-    collapseColumns();
 }
 
 function applySwapPenalty(r1,c1,r2,c2) {
@@ -677,19 +670,23 @@ function applyGravity() {
     for (let c=0; c<COLS; c++) {
         let stack = [];
         let lifeStack = [];
+        let mergedLifeStack = [];
         for (let r=ROWS-1; r>=0; r--) {
             if (grid[r][c]!==0) {
                 stack.push(grid[r][c]);
                 lifeStack.push(whiteLife[r][c]);
+                mergedLifeStack.push(mergedLife[r][c]);
             }
         }
         for (let r=ROWS-1; r>=0; r--) {
             if (stack.length>0) {
                 grid[r][c] = stack.shift();
                 whiteLife[r][c] = lifeStack.shift();
+                mergedLife[r][c] = mergedLifeStack.shift();
             } else {
                 grid[r][c] = 0;
                 whiteLife[r][c] = 0;
+                mergedLife[r][c] = 0;
             }
         }
     }
@@ -1123,8 +1120,11 @@ canvas.addEventListener('click', e=>{
     if (gameOverEl.style.display==="block") return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
 
     const cell = getCell(x,y);
     if (!cell) return;
@@ -1195,10 +1195,20 @@ canvas.addEventListener('contextmenu', e=>{
 });
 
 let touchStartX, touchStartY, touchStartTime;
+let startCell = null;
 
 canvas.addEventListener('touchstart', e => {
     e.preventDefault();
     const touch = e.touches[0];
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const x = (touch.clientX - rect.left) * scaleX;
+    const y = (touch.clientY - rect.top) * scaleY;
+    startCell = getCell(x, y);
+
     touchStartX = touch.clientX;
     touchStartY = touch.clientY;
     touchStartTime = Date.now();
@@ -1245,105 +1255,122 @@ canvas.addEventListener('touchend', e => {
     e.preventDefault();
     const touch = e.changedTouches[0];
 
+    // --- END CELL meghatározása skálázva ---
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
     const x = (touch.clientX - rect.left) * scaleX;
     const y = (touch.clientY - rect.top) * scaleY;
-    const cell = getCell(x, y);
-    if (!cell) return;
+    const endCell = getCell(x, y);
 
-    // swipe irány/távolság: EZ marad clientX/Y alapú
+    if (!startCell || !endCell) return;
+
+    const r1 = startCell.row;
+    const c1 = startCell.col;
+    const r2 = endCell.row;
+    const c2 = endCell.col;
+
+    // --- Ha ugyanaz a cella, nincs teendő ---
+    //if (r1 === r2 && c1 === c2) return;
+
+    // --- Ha bármelyik cella üres, nincs csere ---
+    if (grid[r1][c1] === 0 && grid[r2][c2] === 0) return;
+
     const deltaX = touch.clientX - touchStartX;
     const deltaY = touch.clientY - touchStartY;
-    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    const distance = Math.sqrt(deltaX*deltaX + deltaY*deltaY);
     const duration = Date.now() - touchStartTime;
 
+    // ============================
+    // 1) SWIPE → egyszerű csere/merge
+    // ============================
+    if (distance > 50) {
 
-    if (distance > 50) { // swipe
-        let dirX = 0, dirY = 0;
-        if (Math.abs(deltaX) > Math.abs(deltaY)) {
-            dirX = deltaX > 0 ? 1 : -1;
+        const a = grid[r1][c1];
+        const b = grid[r2][c2];
+
+        if (canMerge(a, b)) {
+            doMerge(r1, c1, r2, c2);
         } else {
-            dirY = deltaY > 0 ? 1 : -1;
+            // sima csere
+            grid[r2][c2] = a;
+            grid[r1][c1] = b;
+
+            // whiteLife csere
+            [whiteLife[r1][c1], whiteLife[r2][c2]] =
+                [whiteLife[r2][c2], whiteLife[r1][c1]];
+
+            // mergedLife csere
+            [mergedLife[r1][c1], mergedLife[r2][c2]] =
+                [mergedLife[r2][c2], mergedLife[r1][c1]];
+
+            applySwapPenalty(r1, c1, r2, c2);
         }
-        const targetRow = cell.row + dirY;
-        const targetCol = cell.col + dirX;
-        if (targetRow >= 0 && targetRow < ROWS && targetCol >= 0 && targetCol < COLS) {
-            const a = grid[cell.row][cell.col];
-            const b = grid[targetRow][targetCol];
-            console.log(`Swipe from (${cell.row},${cell.col}) to (${targetRow},${targetCol}) - values: ${a} → ${b}`);
-            if (canMerge(a, b)) {
-                doMerge(cell.row, cell.col, targetRow, targetCol);
-            } else {
-                grid[targetRow][targetCol] = a;
-                grid[cell.row][cell.col] = b;
-                const lifeA = whiteLife[cell.row][cell.col];
-                const lifeB = whiteLife[targetRow][targetCol];
-                whiteLife[targetRow][targetCol] = lifeA;
-                whiteLife[cell.row][cell.col] = lifeB;
-                const mergedA = mergedLife[cell.row][cell.col];
-                const mergedB = mergedLife[targetRow][targetCol];
-                mergedLife[targetRow][targetCol] = mergedA;
-                mergedLife[cell.row][cell.col] = mergedB;
-                applySwapPenalty(cell.row, cell.col, targetRow, targetCol);
-            }
-            fadeWhites();
-            dissolveMerged();
-            applyGravity();
-            collapseColumns();
-            scoreEl.textContent = Math.round(score);
-            draw();
-            if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
-        }
-    } else if (duration > 500) { // hosszú érintés, robbantás
-        explodeWhiteAt(cell.row, cell.col);
-        hoverInfo = null;
-        draw();
-    } else { // rövid érintés, kiválaszt
-        if (!selected) {
-            selected = cell;
-        } else {
-            const r1 = selected.row;
-            const c1 = selected.col;
-            const r2 = cell.row;
-            const c2 = cell.col;
-            const a = grid[r1][c1];
-            const b = grid[r2][c2];
-            if (r1 === r2 && c1 === c2) {
-                selected = null;
-            } else {
-                if (canMerge(a, b)) {
-                    doMerge(r1, c1, r2, c2);
-                } else {
-                    grid[r2][c2] = a;
-                    grid[r1][c1] = b;
-                    const lifeA = whiteLife[r1][c1];
-                    const lifeB = whiteLife[r2][c2];
-                    whiteLife[r2][c2] = lifeA;
-                    whiteLife[r1][c1] = lifeB;
-                    const mergedA = mergedLife[r1][c1];
-                    const mergedB = mergedLife[r2][c2];
-                    mergedLife[r2][c2] = mergedA;
-                    mergedLife[r1][c1] = mergedB;
-                    applySwapPenalty(r1, c1, r2, c2);
-                }
-                selected = null;
-            }
-        }
+
         fadeWhites();
         dissolveMerged();
         applyGravity();
         collapseColumns();
         scoreEl.textContent = Math.round(score);
-        hoverInfo = null;
-        updateInfoBox(null);
         draw();
-        if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
+        return;
     }
-});
 
+    // ============================
+    // 2) HOSSZÚ ÉRINTÉS → robbantás
+    // ============================
+    if (duration > 500) {
+        explodeWhiteAt(r2, c2);
+        hoverInfo = null;
+        draw();
+        return;
+    }
+
+    // ============================
+    // 3) RÖVID ÉRINTÉS → kijelölés / merge / csere
+    // ============================
+    if (!selected) {
+        selected = endCell;
+    } else {
+        const sr = selected.row;
+        const sc = selected.col;
+
+        const a = grid[sr][sc];
+        const b = grid[r2][c2];
+
+        if (sr === r2 && sc === c2) {
+            selected = null;
+        } else {
+            if (canMerge(a, b)) {
+                doMerge(sr, sc, r2, c2);
+            } else {
+                grid[r2][c2] = a;
+                grid[sr][sc] = b;
+
+                [whiteLife[sr][sc], whiteLife[r2][c2]] =
+                    [whiteLife[r2][c2], whiteLife[sr][sc]];
+
+                [mergedLife[sr][sc], mergedLife[r2][c2]] =
+                    [mergedLife[r2][c2], mergedLife[sr][sc]];
+
+                applySwapPenalty(sr, sc, r2, c2);
+            }
+            selected = null;
+        }
+    }
+
+    fadeWhites();
+    dissolveMerged();
+    applyGravity();
+    collapseColumns();
+    scoreEl.textContent = Math.round(score);
+    hoverInfo = null;
+    updateInfoBox(null);
+    draw();
+
+    if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
+});
 
 initGrid();
 startGame("base");
