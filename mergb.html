@@ -175,7 +175,6 @@ function updateHelp() {
         help = false;
         return;
     }
-    // Medium: help visible only until the board is about half empty
     const total = ROWS * COLS;
     let filled = 0;
     for (let r = 0; r < ROWS; r++) {
@@ -231,12 +230,17 @@ function resetRecords() {
 }
 
 function updateButtons() {
+    const getRec = (level, isTime) => {
+        const key = "mergb_record_" + level + (isTime ? "_time" : "");
+        return parseInt(localStorage.getItem(key) || 0, 10);
+    };
+    
     document.getElementById('easyBtn').innerHTML =
-        `Könnyű (${loadRecord('easy')} / ${loadRecord('easy_time')})`;
+        `Könnyű (${getRec('easy', false)} / ${getRec('easy', true)})`;
     document.getElementById('mediumBtn').innerHTML =
-        `Közepes (${loadRecord('medium')} / ${loadRecord('medium_time')})`;
+        `Közepes (${getRec('medium', false)} / ${getRec('medium', true)})`;
     document.getElementById('hardBtn').innerHTML =
-        `Nehéz (${loadRecord('hard')} / ${loadRecord('hard_time')})`;
+        `Nehéz (${getRec('hard', false)} / ${getRec('hard', true)})`;
 }
 
 function showRecordPopup(newScore, oldRecord) {
@@ -285,7 +289,6 @@ function startGame(level) {
         score = 80;
     }
 
-    // Dinamikus CELL méretezés mobilhoz
     CELL = Math.max(20, Math.min(60, Math.floor(window.innerWidth / COLS)));
 
     canvas.width = COLS * CELL;
@@ -322,97 +325,109 @@ function startTimeDecay() {
 
 function timeTick() {
     
-    let changed = false;
-
     if(microTick == 9) {
-        // 1) Fehérek öregítése
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                if (grid[r][c] === 7 && whiteLife[r][c] > 0) {
-                    whiteLife[r][c]--;
-                    if (whiteLife[r][c] === 0) {
-                        grid[r][c] = 0;
-                        changed = true;
-                    }
-                }
-            }
-        }
-        // 2) Másodlagosak öregítése + bomlás
-        for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-                const val = grid[r][c];
-                if ((val === 3 || val === 5 || val === 6) && mergedLife[r][c] > 0) {
-                    mergedLife[r][c]--;
-                    if (mergedLife[r][c] === 0) {
-                        dissolveOne(r, c, val);
-                        changed = true;
-                    }
-                }
-            }
-        }
-
-        // 3) Ha bármi változott → gravitáció + balra-záródás + újrarajzolás
-        if (changed) {
-            applyGravity();
-            collapseColumns();
-        }
-        score += SIMPLE_SWAP; // időalapú pontlevonás 
+        applyLifeDecay(true);
+        score += SIMPLE_SWAP;
     }
 
     microTick++;
     if(microTick > 9) microTick = 0;
     scoreEl.textContent = Math.round(score);
-    // === GAME OVER ELLENŐRZÉS ===
     if (score <= 0 || (noMovesLeft() && !hasWhite())) {
         endGame();
-        return; // fontos, hogy ne fusson tovább
+        return;
     }
     draw();
 }
 
-function dissolveOne(r, c, val) {
-    score += PRIMARY_MERGE; // pontlevonás a PRIMARY_MERGE alapján
+function dissolveCells(cells) {
+    for (const { r, c, val } of cells) {
+        score += PRIMARY_MERGE;
+        const color1 = (val === 3 ? 1 : val === 5 ? 1 : 2);
+        const color2 = (val === 3 ? 2 : val === 5 ? 4 : 4);
+        grid[r][c] = color1;
+        mergedLife[r][c] = 0;
+        whiteLife[r][c] = 0;
+        let placed = false;
+        const dirs = [
+            { dr: -1, dc: 1 }, { dr: -1, dc: 0 }, { dr: 0, dc: 1 },
+            { dr: 1, dc: -1 }, { dr: 1, dc: 0 }, { dr: 0, dc: -1 }
+        ];
+        for (const dir of dirs) {
+            const nr = r + dir.dr;
+            const nc = c + dir.dc;
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && grid[nr][nc] === 0) {
+                grid[nr][nc] = color2;
+                placed = true;
+                break;
+            }
+        }
+        if (!placed) {
+            let queue = [{ r, c, dist: 0 }];
+            let visited = new Set([`${r},${c}`]);
+            while (queue.length > 0 && !placed) {
+                const { r: qr, c: qc, dist } = queue.shift();
+                if (dist > 5) break;
+                for (const dir of dirs) {
+                    const nr = qr + dir.dr;
+                    const nc = qc + dir.dc;
+                    const key = `${nr},${nc}`;
+                    if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && !visited.has(key)) {
+                        visited.add(key);
+                        if (grid[nr][nc] === 0) {
+                            grid[nr][nc] = color2;
+                            placed = true;
+                            break;
+                        }
+                        queue.push({ r: nr, c: nc, dist: dist + 1 });
+                    }
+                }
+            }
+        }
+    }
+}
 
-    const color1 = (val === 3 ? 1 : val === 5 ? 1 : 2);
-    const color2 = (val === 3 ? 2 : val === 5 ? 4 : 4);
+function applyLifeDecay(isTimeMode = false) {
+    if (isTimeMode && microTick !== 9) return;
 
-    grid[r][c] = color1;
-    mergedLife[r][c] = 0;
-    whiteLife[r][c] = 0;
+    let changed = false;
+    let toDissolve = [];
 
-    const dirs = [
-        { dr: -1, dc: 1 }, { dr: -1, dc: 0 }, { dr: 0, dc: 1 },
-        { dr: 1, dc: -1 }, { dr: 1, dc: 0 }, { dr: 0, dc: -1 }
-    ];
-
-    for (const d of dirs) {
-        const nr = r + d.dr;
-        const nc = c + d.dc;
-        if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && grid[nr][nc] === 0) {
-            grid[nr][nc] = color2;
-            return;
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            if (grid[r][c] === 7 && whiteLife[r][c] > 0) {
+                whiteLife[r][c]--;
+                if (whiteLife[r][c] <= 0) {
+                    grid[r][c] = 0;
+                    whiteLife[r][c] = 0;
+                    mergedLife[r][c] = 0;
+                    changed = true;
+                }
+            }
         }
     }
 
-    // ha nincs közeli üres → BFS
-    let queue = [{ r, c }];
-    let visited = new Set([`${r},${c}`]);
-
-    while (queue.length > 0) {
-        const { r: qr, c: qc } = queue.shift();
-        for (const d of dirs) {
-            const nr = qr + d.dr;
-            const nc = qc + d.dc;
-            const key = `${nr},${nc}`;
-            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS && !visited.has(key)) {
-                visited.add(key);
-                if (grid[nr][nc] === 0) {
-                    grid[nr][nc] = color2;
-                    return;
+    for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+            const val = grid[r][c];
+            if ((val === 3 || val === 5 || val === 6) && mergedLife[r][c] > 0) {
+                mergedLife[r][c]--;
+                if (mergedLife[r][c] <= 0) {
+                    toDissolve.push({ r, c, val });
+                    changed = true;
                 }
-                queue.push({ r: nr, c: nc });
             }
         }
+    }
+
+    if (toDissolve.length > 0) {
+        dissolveCells(toDissolve);
+        changed = true;
+    }
+
+    if (changed) {
+        applyGravity();
+        collapseColumns();
     }
 }
 
@@ -494,13 +509,18 @@ function getBorderColor() {
     return `rgb(${r},${g},${b})`;
 }
 
-function draw() {
+function draw(dr=-1, dc=-1, dg=0, dcc=0) {
     ctx.clearRect(0,0,canvas.width,canvas.height);
     updateHelp();
 
     for (let r=0; r<ROWS; r++) {
         for (let c=0; c<COLS; c++) {
             
+            const dx = (r === dr && c === dc && dcc > 0) ? dcc: 0;
+            const dy = (r === dr && c === dc && dg > 0) ? (-CELL)+dg*5 : 0;
+
+            //if (isAnimating && c !== dc) return;
+
             ctx.shadowColor = 'transparent';
             ctx.shadowBlur = 0;
             ctx.shadowOffsetX = 0;
@@ -525,7 +545,8 @@ function draw() {
 
                 ctx.beginPath();
                 const cp = 0.12;
-                ctx.roundRect(x + CELL*cp, y + CELL*cp, CELL*(1-2*cp), CELL*(1-2*cp), CELL*cp*2);
+
+                ctx.roundRect(x + CELL*cp, y + CELL*cp + dy, CELL*(1-2*cp), CELL*(1-2*cp), CELL*cp*2);
                 ctx.fill();
 
                 ctx.shadowColor = 'transparent';
@@ -568,50 +589,6 @@ function draw() {
     ctx.strokeStyle = getBorderColor();
     ctx.lineWidth = 4;
     ctx.strokeRect(0, 0, canvas.width, canvas.height);
-
-    // === TOOLTIP ===
-    if (hoverInfo) {
-        return; // Ha van infó, azt a külön info box mutatja, így nem rajzolunk plusz tooltipet a vászonra
-        let textLines = [];
-        const { x, y, isAction } = hoverInfo;
-
-        if (isAction) {
-            // Várható érték tooltip (merge/swap)
-            const { expectedValue, moveType, dist } = hoverInfo;
-            textLines = [
-                `Típus: ${moveType}`,
-                `Távolság: ${dist}`,
-                `Érték: ${expectedValue > 0 ? '+' : ''}${expectedValue}`
-            ];
-        } else {
-            // Fehér robbanás tooltip
-            const { value, size, sumLife, mult } = hoverInfo;
-            textLines = [
-                `Érték: ${value}`,
-                `Méret: ${size}`,
-                `Szorzó: ×${mult}`/*,
-                `Életösszeg: ${sumLife}`*/
-            ];
-        }
-
-        ctx.font = "13px sans-serif";
-        ctx.textAlign = "left";
-        ctx.textBaseline = "top";
-
-        const padding = 6;
-        const lineHeight = 16;
-        const width = 150;
-        const height = textLines.length * lineHeight + padding*2;
-
-        ctx.fillStyle = "rgba(0,0,0,0.8)";
-        ctx.fillRect(x, y - height - 10, width, height);
-
-        ctx.fillStyle = "#fff";
-        for (let i=0; i<textLines.length; i++) {
-            ctx.fillText(textLines[i], x + padding, y - height - 10 + padding + i*lineHeight);
-        }
-    }
-
 }
 
 function drawCenterCircleText(x, y, text) {
@@ -666,6 +643,49 @@ function applySwapPenalty(r1,c1,r2,c2) {
     score += SIMPLE_SWAP * dist * DIST_PENALTY;
 }
 
+function executeMove(r1, c1, r2, c2) {
+    const a = grid[r1][c1];
+    const b = grid[r2][c2];
+
+    if (canMerge(a, b)) {
+        doMerge(r1, c1, r2, c2);
+    } else {
+        // Swap grid
+        grid[r2][c2] = a;
+        grid[r1][c1] = b;
+
+        [whiteLife[r1][c1], whiteLife[r2][c2]] = [whiteLife[r2][c2], whiteLife[r1][c1]];
+        [mergedLife[r1][c1], mergedLife[r2][c2]] = [mergedLife[r2][c2], mergedLife[r1][c1]];
+
+        applySwapPenalty(r1, c1, r2, c2);
+    }
+}
+
+let isAnimating = false;
+let activeAnimations = 0;
+
+function animateFall(r, c, steps = CELL/5, current = 0) { 
+    if (current === 0) {
+        activeAnimations++;
+        isAnimating = true;
+    }
+
+    if (current > steps) {
+        activeAnimations--;
+        if (activeAnimations === 0) {
+            isAnimating = false;
+            draw();
+        }
+        return;
+    }
+
+    draw(r, c, current, 0);
+
+    requestAnimationFrame(() => {
+        animateFall(r, c, steps, current + 1);
+    });
+}
+
 function applyGravity() {
     for (let c=0; c<COLS; c++) {
         let stack = [];
@@ -679,15 +699,20 @@ function applyGravity() {
             }
         }
         for (let r=ROWS-1; r>=0; r--) {
+            let oldVal = grid[r][c];
             if (stack.length>0) {
                 grid[r][c] = stack.shift();
                 whiteLife[r][c] = lifeStack.shift();
                 mergedLife[r][c] = mergedLifeStack.shift();
+                if (oldVal !== grid[r][c]) {
+                    animateFall(r, c);
+                }
             } else {
                 grid[r][c] = 0;
                 whiteLife[r][c] = 0;
                 mergedLife[r][c] = 0;
             }
+            
         }
     }
 }
@@ -963,6 +988,47 @@ function getWhiteCluster(row, col) {
     return group;
 }
 
+function processResolve(extraGravity = false) {
+    fadeWhites();
+    dissolveMerged();
+    applyGravity();
+    collapseColumns();
+    if (extraGravity) {
+        applyGravity();
+        collapseColumns();
+    }
+    scoreEl.textContent = Math.round(score);
+    hoverInfo = null;
+    updateInfoBox(null);
+
+    if (!isAnimating) {
+        draw();
+    }
+
+    if (score <= 0 || (noMovesLeft() && !hasWhite())) {
+        endGame();
+        return true;  // Game ended
+    }
+    return false;  // Game continues
+}
+
+function processExplosionResolve() {
+    applyGravity();
+    collapseColumns();
+    fadeWhites();
+    dissolveMerged();
+    applyGravity();
+    collapseColumns();
+    scoreEl.textContent = Math.round(score);
+    hoverInfo = null;
+    updateInfoBox(null);
+    draw();
+
+    if (score <= 0 || (noMovesLeft() && !hasWhite())) {
+        endGame();
+    }
+}
+
 function explodeWhiteAt(row, col) {
     const group = getWhiteCluster(row, col);
     if (!group) return;
@@ -985,13 +1051,88 @@ function explodeWhiteAt(row, col) {
 
     applyGravity();
     collapseColumns();
-    fadeWhites();
-    dissolveMerged();
-    applyGravity();
-    collapseColumns();
-    scoreEl.textContent = Math.round(score);
+    processExplosionResolve();
+}
 
-    if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
+function calculateInfos(sCell, eCell) {
+    const startRow = sCell.row;
+    const startCol = sCell.col;
+    const endRow = eCell.row;
+    const endCol = eCell.col;
+    // === KIVÁLASZTOTT MEZZŐVEL – VÁRHATÓ ÉRTÉK ===
+    if (!(startRow === endRow && startCol === endCol)) {
+        const r1 = startRow;
+        const c1 = startCol;
+        const r2 = endRow;
+        const c2 = endCol;
+
+        const a = grid[r1][c1];
+        const b = grid[r2][c2];
+
+        let expectedValue = 0;
+        let moveType = "";
+
+        if (canMerge(a,b)) {
+            const merged = a|b;
+            const mergeValue = (merged===7 ? SECONDARY_MERGE : PRIMARY_MERGE);
+            const dist = Math.abs(r1-r2) + Math.abs(c1-c2);
+            expectedValue = mergeValue * dist * DIST_PENALTY;
+            moveType = (merged===7 ? "Fehér merge" : "Normál merge");
+        } else if (a!==0 && b!==0) {
+            const dist = Math.abs(r1-r2) + Math.abs(c1-c2);
+            expectedValue = SIMPLE_SWAP * dist * DIST_PENALTY;
+            moveType = "Csere";
+        }
+
+        hoverInfo = {
+            x: endCol*CELL,
+            y: endRow*CELL,
+            expectedValue: Math.round(expectedValue),
+            moveType: moveType,
+            dist: Math.abs(r1-r2) + Math.abs(c1-c2),
+            isAction: true
+        };
+
+        updateInfoBox(hoverInfo);
+        draw();
+        return;
+    }
+
+    // === FEHÉR SZIGET INFO ===
+    if (grid[endRow][endCol] !== 7) {
+        hoverInfo = null;
+        updateInfoBox(null);
+        draw();
+        return;
+    }
+
+    const group = getWhiteCluster(endRow, endCol);
+    if (!group) { 
+        hoverInfo = null; 
+        updateInfoBox(null);
+        draw(); 
+        return; 
+    }
+
+    let sumLife = 0;
+    for (let g of group) sumLife += whiteLife[g.r][g.c];
+
+    let size = group.length;
+    let mult = (size>=8 ? 4 : size>=5 ? 3 : size>=3 ? 2 : 1);
+    let value = sumLife * mult;
+
+    hoverInfo = {
+        x: endCol*CELL,
+        y: endRow*CELL,
+        sumLife,
+        size,
+        mult,
+        value,
+        isAction: false
+    };
+
+    updateInfoBox(hoverInfo);
+    draw();
 }
 
 function updateInfoBox(hoverInfo) {
@@ -1023,6 +1164,9 @@ function updateInfoBox(hoverInfo) {
     infoBox.classList.add('active');
 }
 
+let lastClickTime = 0;
+let lastClickCell = null;
+
 canvas.addEventListener('mousemove', e=>{
     if (gameOverEl.style.display==="block") return;
 
@@ -1030,90 +1174,19 @@ canvas.addEventListener('mousemove', e=>{
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
 
-    const cell = getCell(x,y);
-    if (!cell) { 
+    const endCell = getCell(x,y);
+    if (!endCell) { 
         hoverInfo = null; 
         updateInfoBox(null);
         draw(); 
         return; 
     }
 
-    const {row, col} = cell;
-
-    // === KIVÁLASZTOTT MEZZŐVEL – VÁRHATÓ ÉRTÉK ===
-    if (selected && !(selected.row === row && selected.col === col)) {
-        const r1 = selected.row;
-        const c1 = selected.col;
-        const r2 = row;
-        const c2 = col;
-
-        const a = grid[r1][c1];
-        const b = grid[r2][c2];
-
-        let expectedValue = 0;
-        let moveType = "";
-
-        if (canMerge(a,b)) {
-            const merged = a|b;
-            const mergeValue = (merged===7 ? SECONDARY_MERGE : PRIMARY_MERGE);
-            const dist = Math.abs(r1-r2) + Math.abs(c1-c2);
-            expectedValue = mergeValue * dist * DIST_PENALTY;
-            moveType = (merged===7 ? "Fehér merge" : "Normál merge");
-        } else if (a!==0 && b!==0) {
-            const dist = Math.abs(r1-r2) + Math.abs(c1-c2);
-            expectedValue = SIMPLE_SWAP * dist * DIST_PENALTY;
-            moveType = "Csere";
-        }
-
-        hoverInfo = {
-            x: col*CELL,
-            y: row*CELL,
-            expectedValue: Math.round(expectedValue),
-            moveType: moveType,
-            dist: Math.abs(r1-r2) + Math.abs(c1-c2),
-            isAction: true
-        };
-
-        updateInfoBox(hoverInfo);
-        draw();
-        return;
+    let startCell = endCell;
+    if (selected) {
+        startCell = {row: selected.row, col: selected.col};
     }
-
-    // === FEHÉR SZIGET TOOLTIP ===
-    if (grid[row][col] !== 7) {
-        hoverInfo = null;
-        updateInfoBox(null);
-        draw();
-        return;
-    }
-
-    const group = getWhiteCluster(row, col);
-    if (!group) { 
-        hoverInfo = null; 
-        updateInfoBox(null);
-        draw(); 
-        return; 
-    }
-
-    let sumLife = 0;
-    for (let g of group) sumLife += whiteLife[g.r][g.c];
-
-    let size = group.length;
-    let mult = (size>=8 ? 4 : size>=5 ? 3 : size>=3 ? 2 : 1);
-    let value = sumLife * mult;
-
-    hoverInfo = {
-        x: col*CELL,
-        y: row*CELL,
-        sumLife,
-        size,
-        mult,
-        value,
-        isAction: false
-    };
-
-    updateInfoBox(hoverInfo);
-    draw();
+    calculateInfos(startCell, endCell);
 });
 
 canvas.addEventListener('click', e=>{
@@ -1129,6 +1202,29 @@ canvas.addEventListener('click', e=>{
     const cell = getCell(x,y);
     if (!cell) return;
 
+    const now = Date.now();
+    const sameCell = lastClickCell &&
+                    lastClickCell.row === cell.row &&
+                    lastClickCell.col === cell.col;
+
+    if (sameCell && (now - lastClickTime) < 300) {
+        // === DOUBLE CLICK → ROBBANTÁS ===
+        explodeWhiteAt(cell.row, cell.col);
+        hoverInfo = null;
+        updateInfoBox(null);
+        draw();
+
+        // reset
+        lastClickCell = null;
+        lastClickTime = 0;
+        return;
+    }
+
+    // első kattintás
+    lastClickCell = cell;
+    lastClickTime = now;
+
+
     if (!selected) {
         selected = cell;
     } else {
@@ -1143,38 +1239,12 @@ canvas.addEventListener('click', e=>{
         if (r1===r2 && c1===c2) {
             selected=null;
         } else {
-            if (canMerge(a,b)) {
-                doMerge(r1,c1,r2,c2);
-            } else {
-                grid[r2][c2] = a;
-                grid[r1][c1] = b;
-
-                const lifeA = whiteLife[r1][c1];
-                const lifeB = whiteLife[r2][c2];
-                whiteLife[r2][c2] = lifeA;
-                whiteLife[r1][c1] = lifeB;
-
-                const mergedA = mergedLife[r1][c1];
-                const mergedB = mergedLife[r2][c2];
-                mergedLife[r2][c2] = mergedA;
-                mergedLife[r1][c1] = mergedB;
-
-                applySwapPenalty(r1, c1, r2, c2);
-            }
+            executeMove(r1, c1, r2, c2);
             selected=null;
         }
     }
 
-    fadeWhites();
-    dissolveMerged();
-    applyGravity();
-    collapseColumns();
-    scoreEl.textContent = Math.round(score);
-    hoverInfo = null;
-    updateInfoBox(null);
-    draw();
-
-    if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
+    processResolve(false);
 });
 
 canvas.addEventListener('contextmenu', e=>{
@@ -1194,8 +1264,11 @@ canvas.addEventListener('contextmenu', e=>{
     draw();
 });
 
-let touchStartX, touchStartY, touchStartTime;
+let touchStartTime;
 let startCell = null;
+let endCell = null;
+let lastTapTime = 0;
+let lastTapCell = null;
 
 canvas.addEventListener('touchstart', e => {
     e.preventDefault();
@@ -1208,14 +1281,14 @@ canvas.addEventListener('touchstart', e => {
     const x = (touch.clientX - rect.left) * scaleX;
     const y = (touch.clientY - rect.top) * scaleY;
     startCell = getCell(x, y);
-
-    touchStartX = touch.clientX;
-    touchStartY = touch.clientY;
     touchStartTime = Date.now();
 });
 
-canvas.addEventListener('touchmove', e => {
+canvas.addEventListener('touchmove', e => { 
     e.preventDefault();
+
+        selected = null;
+
     if (gameOverEl.style.display==="block") return;
     if (!selected) {
         const touch = e.touches[0];
@@ -1232,22 +1305,11 @@ canvas.addEventListener('touchmove', e => {
         if (!cell) {
             hoverInfo = null;
             updateInfoBox(null);
+            draw();
             return;
         }
 
-        const {row, col} = cell;
-        if (grid[row][col] === 7) {
-            const group = getWhiteCluster(row, col);
-            if (group) {
-                let sumLife = 0;
-                for (let g of group) sumLife += whiteLife[g.r][g.c];
-                let size = group.length;
-                let mult = (size>=8 ? 4 : size>=5 ? 3 : size>=3 ? 2 : 1);
-                let value = sumLife * mult;
-                hoverInfo = {x: col*CELL, y: row*CELL, sumLife, size, mult, value, isAction: false};
-                updateInfoBox(hoverInfo);
-            }
-        }
+        calculateInfos(startCell, cell);
     }
 });
 
@@ -1255,6 +1317,8 @@ canvas.addEventListener('touchend', e => {
     e.preventDefault();
     const touch = e.changedTouches[0];
 
+
+    
     // --- END CELL meghatározása skálázva ---
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -1262,7 +1326,27 @@ canvas.addEventListener('touchend', e => {
 
     const x = (touch.clientX - rect.left) * scaleX;
     const y = (touch.clientY - rect.top) * scaleY;
-    const endCell = getCell(x, y);
+    endCell = getCell(x, y);
+
+    const now = Date.now();
+    const sameCell = (startCell.row === endCell.row && startCell.col === endCell.col);
+
+    if (sameCell) {
+        if (lastTapCell &&
+            lastTapCell.row === startCell.row &&
+            lastTapCell.col === startCell.col &&
+            now - lastTapTime < 300) {
+
+            // === DOUBLE TAP → ROBBANTÁS ===
+            explodeWhiteAt(startCell.row, startCell.col);
+            lastTapCell = null;
+            return;
+        }
+
+        // első tap
+        lastTapCell = startCell;
+        lastTapTime = now;
+    }
 
     if (!startCell || !endCell) return;
 
@@ -1271,49 +1355,17 @@ canvas.addEventListener('touchend', e => {
     const r2 = endCell.row;
     const c2 = endCell.col;
 
-    // --- Ha ugyanaz a cella, nincs teendő ---
-    //if (r1 === r2 && c1 === c2) return;
-
     // --- Ha bármelyik cella üres, nincs csere ---
     if (grid[r1][c1] === 0 && grid[r2][c2] === 0) return;
 
-    const deltaX = touch.clientX - touchStartX;
-    const deltaY = touch.clientY - touchStartY;
-    const distance = Math.sqrt(deltaX*deltaX + deltaY*deltaY);
     const duration = Date.now() - touchStartTime;
 
     // ============================
     // 1) SWIPE → egyszerű csere/merge
     // ============================
-    if (distance > 50) {
-
-        const a = grid[r1][c1];
-        const b = grid[r2][c2];
-
-        if (canMerge(a, b)) {
-            doMerge(r1, c1, r2, c2);
-        } else {
-            // sima csere
-            grid[r2][c2] = a;
-            grid[r1][c1] = b;
-
-            // whiteLife csere
-            [whiteLife[r1][c1], whiteLife[r2][c2]] =
-                [whiteLife[r2][c2], whiteLife[r1][c1]];
-
-            // mergedLife csere
-            [mergedLife[r1][c1], mergedLife[r2][c2]] =
-                [mergedLife[r2][c2], mergedLife[r1][c1]];
-
-            applySwapPenalty(r1, c1, r2, c2);
-        }
-
-        fadeWhites();
-        dissolveMerged();
-        applyGravity();
-        collapseColumns();
-        scoreEl.textContent = Math.round(score);
-        draw();
+    if (startCell.row !== endCell.row || startCell.col !== endCell.col){
+        executeMove(r1, c1, r2, c2);
+        processResolve(false);
         return;
     }
 
@@ -1342,39 +1394,16 @@ canvas.addEventListener('touchend', e => {
         if (sr === r2 && sc === c2) {
             selected = null;
         } else {
-            if (canMerge(a, b)) {
-                doMerge(sr, sc, r2, c2);
-            } else {
-                grid[r2][c2] = a;
-                grid[sr][sc] = b;
-
-                [whiteLife[sr][sc], whiteLife[r2][c2]] =
-                    [whiteLife[r2][c2], whiteLife[sr][sc]];
-
-                [mergedLife[sr][sc], mergedLife[r2][c2]] =
-                    [mergedLife[r2][c2], mergedLife[sr][sc]];
-
-                applySwapPenalty(sr, sc, r2, c2);
-            }
+            executeMove(sr, sc, r2, c2);
             selected = null;
         }
     }
 
-    fadeWhites();
-    dissolveMerged();
-    applyGravity();
-    collapseColumns();
-    scoreEl.textContent = Math.round(score);
-    hoverInfo = null;
-    updateInfoBox(null);
-    draw();
-
-    if (score <= 0 || (noMovesLeft() && !hasWhite())) endGame();
+    processResolve(false);
 });
 
 initGrid();
 startGame("base");
-//draw();
 updateButtons();
 </script>
 
